@@ -1,0 +1,7 @@
+__pychache__
+.venv
+build
+dist
+main.py
+report_generator_v1.py
+ver_aulas_conducao.py
