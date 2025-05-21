@@ -46,8 +46,107 @@ from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtCore import QTimer, QUrl, Qt, Slot, Signal, QObject, QThread
 from PySide6.QtGui import QColor, QPalette, QPixmap, QIcon, QDesktopServices
 
+from emg_bridge_manager import EMGBridgeManager
+from PySide6.QtCore import QObject, Signal, Slot
+from PySide6.QtWidgets import QPushButton, QLabel, QComboBox, QCheckBox, QHBoxLayout, QFrame
+
 import pyqtgraph as pg
 import serial
+
+import zmq
+import json
+import threading
+
+def run_application(existing_app=None):
+    """
+    Run the application with proper QApplication management
+    
+    Args:
+        existing_app: An existing QApplication instance if available
+        
+    Returns:
+        The exit code from the application
+    """
+    import sys
+    from PyQt5.QtWidgets import QApplication
+    import pyqtgraph as pg
+    from PyQt5.QtGui import QIcon
+    import os
+    
+    # Use existing app or create a new one
+    if existing_app:
+        app = existing_app
+    else:
+        app = QApplication.instance() or QApplication(sys.argv)
+    
+    # Configure application
+    pg.setConfigOption('background', 'w')
+    pg.setConfigOption('foreground', 'k')
+    app.setWindowIcon(QIcon(IMAGE_PATH + "app_icon.png"))
+    
+    # Ensure the base OUTPUT_PATH exists at startup
+    try:
+        os.makedirs(OUTPUT_PATH, exist_ok=True)
+        print(f"Ensured base output directory exists: {OUTPUT_PATH}")
+    except OSError as e:
+        print(f"Could not create base output directory {OUTPUT_PATH}: {e}")
+    
+    # Set application properties
+    app.current_app_language = DEFAULT_LANGUAGE
+    app.main_window_instance = None
+    current_patient_name = None
+    main_window_ref = None
+    
+    # Main application loop
+    while True:
+        current_lang_for_dialogs = app.current_app_language
+        
+        if not current_patient_name:
+            patient_dialog = PatientDialog()
+            if patient_dialog.exec() != QDialog.Accepted or not patient_dialog.selected_patient_name:
+                print("Patient selection cancelled or no name provided. Exiting.")
+                return 0
+            current_patient_name = patient_dialog.selected_patient_name
+            app.current_app_language = patient_dialog.dialog_language
+            
+        current_lang_for_dialogs = app.current_app_language
+        exercise_dialog = SelectionDialog(patient_name=current_patient_name)
+        
+        if exercise_dialog.exec() != QDialog.Accepted:
+            print("Exercise selection dialog closed or rejected. Exiting.")
+            return 0
+            
+        app.current_app_language = exercise_dialog.dialog_language
+        
+        if main_window_ref is not None:
+            print("Deleting previous main window instance.")
+            main_window_ref.deleteLater()
+            main_window_ref = None
+            app.main_window_instance = None
+            
+        main_window_ref = MainWindow(
+            patient_name=current_patient_name,
+            selected_sequence_name=exercise_dialog.selected_sequence_name_internal,
+            selected_steps=exercise_dialog.selected_sequence_steps
+        )
+        
+        app.main_window_instance = main_window_ref
+        main_window_ref.show()
+        
+        # This is the original issue - we should only have one exec() call
+        # and handle restarting differently
+        app.processEvents()  # Process pending events
+        result = app.exec_()
+        
+        # Check if we need to restart or exit
+        if hasattr(main_window_ref, 'close_for_restart_flag') and main_window_ref.close_for_restart_flag:
+            print("Restarting application flow (Play Again was clicked).")
+            # No need to exit the event loop, just continue the while loop
+            continue
+        else:
+            print("Application will now exit.")
+            return result
+
 
 # --- Configuration ---
 APP_TITLE = "Stroke Rehabilitation Assistant"
@@ -61,6 +160,11 @@ SIMULATE_EMG = True
 SIMULATION_DELAY_S = 2
 POSSIBLE_STATUSES = ['NO_MOVEMENT', 'INCORRECT_MOVEMENT', 'CORRECT_WEAK', 'CORRECT_STRONG']
 STATUS_WEIGHTS = [0.3, 0.2, 0.3, 0.2]
+
+if not QApplication.instance():
+    app = QApplication(sys.argv)
+else:
+    app = QApplication.instance()
 
 
 def resource_path(relative_path):
@@ -269,26 +373,173 @@ EXERCISE_SEQUENCES = {
 }
 
 # --- Worker Thread ---
-class EMGProcessingWorker(QObject): # Keep as is
-    new_result = Signal(dict); stopped = Signal()
-    def __init__(self): super().__init__(); self.running = False
+class EMGZmqReceiver:
+    def __init__(self, port=5555):
+        """Initialize a ZMQ client to receive EMG data"""
+        self.port = port
+        self.context = zmq.Context()
+        self.socket = self.context.socket(zmq.SUB)
+        self.socket.setsockopt_string(zmq.SUBSCRIBE, "")
+        self.socket.connect(f"tcp://localhost:{self.port}")
+        self.socket.RCVTIMEO = 100  # Set timeout to 100ms
+        self.running = False
+        self.latest_data = None
+        self.receive_thread = None
+    
+    def start(self):
+        """Start receiving data from the ZMQ socket"""
+        self.running = True
+        self.receive_thread = threading.Thread(target=self._receive_data)
+        self.receive_thread.daemon = True
+        self.receive_thread.start()
+        print(f"EMG ZMQ receiver started on port {self.port}")
+    
+    def stop(self):
+        """Stop receiving data"""
+        self.running = False
+        if self.receive_thread:
+            self.receive_thread.join(timeout=1.0)
+        self.socket.close()
+        self.context.term()
+        print("EMG ZMQ receiver stopped")
+    
+    def _receive_data(self):
+        """Receive data from the ZMQ socket in a loop"""
+        while self.running:
+            try:
+                message = self.socket.recv_string()
+                data = json.loads(message)
+                self.latest_data = data
+            except zmq.error.Again:
+                # Timeout occurred, just continue the loop
+                pass
+            except Exception as e:
+                print(f"Error receiving EMG data: {e}")
+    
+    def get_latest_data(self):
+        """Get the latest received EMG data"""
+        return self.latest_data
+
+class EMGProcessingWorker(QObject):
+    new_result = Signal(dict)
+    stopped = Signal()
+    
+    def __init__(self, zmq_port=5555):
+        super().__init__()
+        self.running = False
+        self.zmq_port = zmq_port
+        self.zmq_context = None
+        self.zmq_socket = None
+        
+    def _setup_zmq(self):
+        """Setup ZMQ connection to receive EMG data"""
+        try:
+            self.zmq_context = zmq.Context()
+            self.zmq_socket = self.zmq_context.socket(zmq.SUB)
+            self.zmq_socket.setsockopt_string(zmq.SUBSCRIBE, "")
+            self.zmq_socket.connect(f"tcp://localhost:{self.zmq_port}")
+            self.zmq_socket.RCVTIMEO = 100  # Set timeout to 100ms
+            print(f"ZMQ subscriber connected to port {self.zmq_port}")
+            return True
+        except Exception as e:
+            print(f"Error setting up ZMQ: {e}")
+            return False
+    
+    def _cleanup_zmq(self):
+        """Clean up ZMQ resources"""
+        if self.zmq_socket:
+            self.zmq_socket.close()
+        if self.zmq_context:
+            self.zmq_context.term()
+        self.zmq_socket = None
+        self.zmq_context = None
+    
     @Slot()
     def run(self):
-        self.running = True; print("Worker thread started.")
+        self.running = True
+        print("Worker thread started.")
+        
+        # Setup ZMQ connection if not simulating EMG
+        use_zmq = not SIMULATE_EMG
+        zmq_connected = False
+        
+        if use_zmq:
+            zmq_connected = self._setup_zmq()
+        
         while self.running:
             if SIMULATE_EMG:
+                # Original simulation code
                 time.sleep(SIMULATION_DELAY_S)
                 status = random.choices(POSSIBLE_STATUSES, weights=STATUS_WEIGHTS, k=1)[0]
                 intensity = 0.0
-                if status == 'CORRECT_WEAK': intensity = random.uniform(0.2, 0.5)
-                elif status == 'CORRECT_STRONG': intensity = random.uniform(0.55, 1.0)
-                plot_data = [random.gauss(0, 0.1) + (intensity * 0.5 if status.startswith('CORRECT') else 0) for _ in range(100)]
-                result = {'status': status, 'intensity': intensity, 'plot_data': plot_data, 'timestamp': time.time()}
+                if status == 'CORRECT_WEAK':
+                    intensity = random.uniform(0.2, 0.5)
+                elif status == 'CORRECT_STRONG':
+                    intensity = random.uniform(0.55, 1.0)
+                plot_data = [random.gauss(0, 0.1) + (intensity * 0.5 if status.startswith('CORRECT') else 0) 
+                            for _ in range(100)]
+                result = {
+                    'status': status,
+                    'intensity': intensity,
+                    'plot_data': plot_data,
+                    'timestamp': time.time()
+                }
                 self.new_result.emit(result)
-            else: time.sleep(0.02)
-            if not self.running: break
-        print("Worker thread stopping."); self.stopped.emit()
-    def stop(self): print("Stop requested for worker thread."); self.running = False
+                
+            elif use_zmq and zmq_connected:
+                # Read data from ZMQ
+                try:
+                    message = self.zmq_socket.recv_string()
+                    data = json.loads(message)
+                    
+                    # Map ZMQ status to app status
+                    zmq_status = data.get('status', 'idle')
+                    intensity = data.get('intensity', 0.0)
+                    
+                    # Map ZMQ status to app status format
+                    if zmq_status == 'idle':
+                        status = 'IDLE'
+                    elif zmq_status == 'active':
+                        if intensity < 0.5:
+                            status = 'CORRECT_WEAK'
+                        else:
+                            status = 'CORRECT_STRONG'
+                    else:
+                        status = zmq_status.upper()
+                    
+                    # Format the result as expected by the application
+                    result = {
+                        'status': status,
+                        'intensity': intensity,
+                        'plot_data': data.get('plot_data', [0.0] * 100),
+                        'timestamp': data.get('timestamp', time.time())
+                    }
+                    
+                    self.new_result.emit(result)
+                    
+                except zmq.error.Again:
+                    # Timeout waiting for message, continue the loop
+                    time.sleep(0.01)
+                except Exception as e:
+                    print(f"Error receiving ZMQ data: {e}")
+                    time.sleep(0.1)
+            
+            else:
+                time.sleep(0.02)
+                
+            if not self.running:
+                break
+                
+        # Clean up
+        if use_zmq and zmq_connected:
+            self._cleanup_zmq()
+            
+        print("Worker thread stopping.")
+        self.stopped.emit()
+    
+    def stop(self):
+        print("Stop requested for worker thread.")
+        self.running = False
 
 CURRENT_EXERCISE_STEPS = []
 
@@ -491,6 +742,11 @@ class MainWindow(QMainWindow): # Keep as is
         self.setWindowIcon(QIcon(IMAGE_PATH + "app_icon.png"))
         self.media_player.mediaStatusChanged.connect(self.handle_media_status_changed)
         self.setup_arduino()
+        # Create EMG Bridge Manager
+        self.emg_bridge = EMGBridgeManager()
+        self.emg_bridge.status_changed.connect(self.on_bridge_status_changed)
+        # Create EMG control widgets
+        self.setup_emg_controls()
         self.processing_thread.start(); self.advance_step()
 
     def _start_new_session_tracking(self): # Keep as is
@@ -722,6 +978,90 @@ class MainWindow(QMainWindow): # Keep as is
                  if effect_playing is not None and effect_playing.isPlaying(): effect_playing.stop()
             if sound_to_play.isLoaded(): sound_to_play.play()
             else: print(f" -> Warning: Sound {sound_key} not loaded. Attempting play anyway..."); sound_to_play.play()
+
+    def setup_emg_controls(self):
+        """Set up EMG data acquisition controls"""
+        # Create a frame/group for EMG controls
+        emg_frame = QFrame(self)
+        emg_frame.setFrameStyle(QFrame.StyledPanel | QFrame.Raised)
+        emg_layout = QVBoxLayout(emg_frame)
+        emg_layout.setContentsMargins(10, 10, 10, 10)
+        
+        # Title label
+        title_label = QLabel("EMG Data Acquisition", emg_frame)
+        title_label.setStyleSheet("font-weight: bold;")
+        emg_layout.addWidget(title_label)
+        
+        # DAQ device selection
+        device_layout = QHBoxLayout()
+        device_label = QLabel("DAQ Device:", emg_frame)
+        self.device_combo = QComboBox(emg_frame)
+        self.device_combo.addItems(["Dev1", "Dev2", "Dev3"])
+        device_layout.addWidget(device_label)
+        device_layout.addWidget(self.device_combo)
+        emg_layout.addLayout(device_layout)
+        
+        # Channel selection
+        channels_layout = QHBoxLayout()
+        channels_label = QLabel("Channels:", emg_frame)
+        self.channels_edit = QLineEdit(emg_frame)
+        self.channels_edit.setText("ai0:3")  # Default to 4 channels
+        channels_layout.addWidget(channels_label)
+        channels_layout.addWidget(self.channels_edit)
+        emg_layout.addLayout(channels_layout)
+        
+        # Simulation mode
+        self.simulate_check = QCheckBox("Use simulated EMG data", emg_frame)
+        emg_layout.addWidget(self.simulate_check)
+        
+        # Start/Stop button
+        button_layout = QHBoxLayout()
+        self.emg_start_button = QPushButton("Start EMG Acquisition", emg_frame)
+        self.emg_start_button.clicked.connect(self.toggle_emg_acquisition)
+        button_layout.addWidget(self.emg_start_button)
+        emg_layout.addLayout(button_layout)
+        
+        # Status label
+        self.emg_status_label = QLabel("EMG Status: Not running", emg_frame)
+        emg_layout.addWidget(self.emg_status_label)
+        
+        # Add the frame to your main layout
+        # Depending on your UI structure:
+        self.layout().addWidget(emg_frame)  # or main_layout.addWidget(emg_frame)
+        
+    def toggle_emg_acquisition(self):
+        """Start or stop EMG data acquisition"""
+        if self.emg_bridge.is_running:
+            # Stop the bridge
+            self.emg_bridge.stop_bridge()
+            self.emg_start_button.setEnabled(False)  # Temporarily disable while stopping
+        else:
+            # Start the bridge
+            device = self.device_combo.currentText()
+            channels = self.channels_edit.text()
+            simulate = self.simulate_check.isChecked()
+            
+            self.emg_start_button.setEnabled(False)  # Temporarily disable while starting
+            success = self.emg_bridge.start_bridge(
+                simulate=simulate,
+                device=device,
+                channels=channels
+            )
+            
+            if not success:
+                self.emg_start_button.setEnabled(True)
+                
+    def on_bridge_status_changed(self, status):
+        """Update UI based on bridge status"""
+        self.emg_status_label.setText(f"EMG Status: {status}")
+        
+        # Re-enable button if needed
+        if not self.emg_bridge.is_running:
+            self.emg_start_button.setText("Start EMG Acquisition")
+            self.emg_start_button.setEnabled(True)
+        else:
+            self.emg_start_button.setText("Stop EMG Acquisition")
+            self.emg_start_button.setEnabled(True)
 
     @Slot(QMediaPlayer.MediaStatus)
     def handle_media_status_changed(self, status: QMediaPlayer.MediaStatus): # Keep as is
@@ -962,51 +1302,4 @@ class MainWindow(QMainWindow): # Keep as is
 
 # --- Main Execution Block ---
 if __name__ == '__main__':
-    app = QApplication(sys.argv)
-    pg.setConfigOption('background', 'w'); pg.setConfigOption('foreground', 'k')
-    app.setWindowIcon(QIcon(IMAGE_PATH + "app_icon.png"))
-    # Ensure the base OUTPUT_PATH exists at startup
-    try:
-        os.makedirs(OUTPUT_PATH, exist_ok=True)
-        print(f"Ensured base output directory exists: {OUTPUT_PATH}")
-    except OSError as e:
-        print(f"Could not create base output directory {OUTPUT_PATH}: {e}")
-
-    QApplication.instance().current_app_language = DEFAULT_LANGUAGE
-    QApplication.instance().main_window_instance = None 
-    current_patient_name = None
-    main_window_ref = None 
-    while True:
-        current_lang_for_dialogs = QApplication.instance().current_app_language
-        if not current_patient_name:
-            patient_dialog = PatientDialog()
-            if patient_dialog.exec() != QDialog.Accepted or not patient_dialog.selected_patient_name:
-                print("Patient selection cancelled or no name provided. Exiting."); sys.exit(0)
-            current_patient_name = patient_dialog.selected_patient_name
-            if hasattr(QApplication.instance(), 'current_app_language'):
-                 QApplication.instance().current_app_language = patient_dialog.dialog_language
-        current_lang_for_dialogs = QApplication.instance().current_app_language
-        exercise_dialog = SelectionDialog(patient_name=current_patient_name)
-        if exercise_dialog.exec() != QDialog.Accepted:
-            print("Exercise selection dialog closed or rejected. Exiting."); sys.exit(0)
-        if hasattr(QApplication.instance(), 'current_app_language'):
-            QApplication.instance().current_app_language = exercise_dialog.dialog_language
-        if main_window_ref is not None:
-            print("Deleting previous main window instance."); main_window_ref.deleteLater()
-            main_window_ref = None; QApplication.instance().main_window_instance = None
-        main_window_ref = MainWindow(
-            patient_name=current_patient_name,
-            selected_sequence_name=exercise_dialog.selected_sequence_name_internal, # Pass internal key
-            selected_steps=exercise_dialog.selected_sequence_steps
-        )
-        QApplication.instance().main_window_instance = main_window_ref
-        main_window_ref.show()
-        app.exec()
-        if hasattr(main_window_ref, 'close_for_restart_flag') and main_window_ref.close_for_restart_flag:
-            print("Restarting application flow (Play Again was clicked).")
-            # To re-select patient on "Play Again", uncomment next line
-            # current_patient_name = None 
-            continue 
-        else:
-            print("Application will now exit."); break 
-    sys.exit(0)
+    sys.exit(run_application())
