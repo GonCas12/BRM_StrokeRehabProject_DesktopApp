@@ -1070,21 +1070,72 @@ class MainWindow(QMainWindow): # Keep as is
                 print("Video ended, looping..."); self.media_player.setPosition(0); self.media_player.play()
 
     @Slot(dict)
-    def handle_emg_result(self, result): # Keep as is
-        if 'plot_data' in result: self.emg_curve.setData(result['plot_data'])
-        if 0 <= self.current_step_index < len(self.current_exercise_steps_definition):
-            status = result.get('status', 'NO_MOVEMENT')
-            intensity = result.get('intensity', 0.0)
-            timestamp = result.get('timestamp', 0)
-            if status in self.current_step_attempts: self.current_step_attempts[status] += 1
-            status_to_key_map = {'NO_MOVEMENT': 'feedback_no_movement', 'INCORRECT_MOVEMENT': 'feedback_incorrect', 'CORRECT_WEAK': 'feedback_weak', 'CORRECT_STRONG': 'feedback_strong'}
-            feedback_key = status_to_key_map.get(status, 'feedback_initializing')
-            self.feedback_label.setText(self.tr(feedback_key)); self.set_feedback_style(status); self.play_sound(status)
-            if status == 'CORRECT_STRONG' and self.advance_on_success:
-                 if self.last_successful_status_time == 0:
-                     self.last_successful_status_time = timestamp; print(f"Correct+Strong detected at {timestamp}. Advancing.")
-                     self.feedback_label.setText(self.tr('feedback_next_step')); self.play_sound('NEXT_STEP')
-                     QTimer.singleShot(ADVANCE_DELAY_MS, lambda: self.advance_step(intensity=intensity))
+    def handle_emg_result(self, result):
+        # Update plot data
+        if 'plot_data' in result:
+            self.emg_curve.setData(result['plot_data'])
+        
+        # Skip if not in an exercise step
+        if not (0 <= self.current_step_index < len(self.current_exercise_steps_definition)):
+            return
+            
+        # Get basic data
+        status = result.get('status', 'NO_MOVEMENT')
+        intensity = result.get('intensity', 0.0)
+        timestamp = result.get('timestamp', 0)
+        
+        # Get movement type from classifier if available
+        movement_type = result.get('movement', 'Rest')
+        confidence = result.get('confidence', 0.0)
+        
+        # Get expected movement for this step
+        step_info = self.current_exercise_steps_definition[self.current_step_index]
+        expected_movement = step_info.get('expected_movement', None)
+        
+        # Determine correct status based on movement and step requirements
+        if status == 'IDLE' or movement_type == 'Rest' or intensity < 0.2:
+            status = 'NO_MOVEMENT'
+        elif expected_movement and expected_movement != movement_type:
+            # Wrong movement type detected
+            status = 'INCORRECT_MOVEMENT'
+        else:
+            # Correct movement type
+            if intensity >= 0.5:
+                status = 'CORRECT_STRONG'
+            else:
+                status = 'CORRECT_WEAK'
+        
+        # Track attempts
+        if status in self.current_step_attempts:
+            self.current_step_attempts[status] += 1
+        
+        # Update feedback
+        status_to_key_map = {
+            'NO_MOVEMENT': 'feedback_no_movement',
+            'INCORRECT_MOVEMENT': 'feedback_incorrect',
+            'CORRECT_WEAK': 'feedback_weak',
+            'CORRECT_STRONG': 'feedback_strong'
+        }
+        feedback_key = status_to_key_map.get(status, 'feedback_initializing')
+        
+        # Add movement type to feedback if available
+        if movement_type != 'Rest' and confidence > 0.6:
+            movement_feedback = f" ({movement_type}: {confidence:.2f})"
+            self.feedback_label.setText(self.tr(feedback_key) + movement_feedback)
+        else:
+            self.feedback_label.setText(self.tr(feedback_key))
+        
+        self.set_feedback_style(status)
+        self.play_sound(status)
+        
+        # Advance on successful strong movement
+        if status == 'CORRECT_STRONG' and self.advance_on_success:
+            if self.last_successful_status_time == 0:
+                self.last_successful_status_time = timestamp
+                print(f"Correct+Strong detected at {timestamp}. Movement: {movement_type} with confidence {confidence:.2f}. Advancing.")
+                self.feedback_label.setText(self.tr('feedback_next_step'))
+                self.play_sound('NEXT_STEP')
+                QTimer.singleShot(ADVANCE_DELAY_MS, lambda: self.advance_step(intensity=intensity))
 
     @Slot()
     def advance_step(self, intensity=0.0): # Keep as is
