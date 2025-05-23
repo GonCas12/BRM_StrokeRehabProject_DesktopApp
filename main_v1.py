@@ -49,6 +49,8 @@ from PySide6.QtGui import QColor, QPalette, QPixmap, QIcon, QDesktopServices
 import pyqtgraph as pg
 import serial
 
+import neurokit2 as nk
+
 # --- Configuration ---
 APP_TITLE = "Stroke Rehabilitation Assistant"
 UPDATE_INTERVAL_MS = 100
@@ -93,6 +95,34 @@ EXERCISE_STEPS_TEMPLATE = [
     {'id': 3, 'name_en': 'Lift Cup', 'name_pt': 'Levantar Copo', 'video': 'lift_cup.mp4', 'target_muscle': 'Biceps'},
     {'id': 4, 'name_en': 'Drink', 'name_pt': 'Beber', 'video': 'drink.mp4', 'target_muscle': 'Biceps'},
     {'id': 5, 'name_en': 'Lower Cup', 'name_pt': 'Pousar Copo', 'video': 'lower_cup.mp4', 'target_muscle': 'Triceps'},
+]
+
+SOUP_STEPS = [
+    EXERCISE_STEPS_TEMPLATE[0], # Rest
+    {'id': 6, 'name_en': 'Reach for Spoon', 'name_pt': 'Alcançar Colher', 'video': 'reach_spoon.mp4', 'target_muscle': 'Biceps'},
+    {'id': 7, 'name_en': 'Grasp Spoon', 'name_pt': 'Agarrar Colher', 'video': 'grasp_spoon.mp4', 'target_muscle': 'Pronator'},
+    {'id': 8, 'name_en': 'Scoop Soup', 'name_pt': 'Apanhar Sopa', 'video': 'scoop_soup.mp4', 'target_muscle': 'Biceps'},
+    {'id': 9, 'name_en': 'Bring Spoon to Mouth', 'name_pt': 'Levar Colher à Boca', 'video': 'bring_spoon_mouth.mp4', 'target_muscle': 'Biceps'},
+    {'id': 10, 'name_en': 'Return Spoon to Bowl', 'name_pt': 'Devolver Colher à Tigela', 'video': 'return_spoon_bowl.mp4', 'target_muscle': 'Triceps'},
+    {'id': 11, 'name_en': 'Lower Spoon', 'name_pt': 'Pousar Colher', 'video': 'lower_spoon.mp4', 'target_muscle': 'Triceps'},
+]
+
+BOOK_GRAB_STEPS = [
+    EXERCISE_STEPS_TEMPLATE[0], # Rest
+    {'id': 12, 'name_en': 'Reach for Book', 'name_pt': 'Alcançar Livro', 'video': 'reach_book.mp4', 'target_muscle': 'Biceps'},
+    {'id': 13, 'name_en': 'Grasp Book', 'name_pt': 'Agarrar Livro', 'video': 'grasp_book.mp4', 'target_muscle': 'Pronator'},
+    {'id': 14, 'name_en': 'Lift Book', 'name_pt': 'Levantar Livro', 'video': 'lift_book.mp4', 'target_muscle': 'Biceps'},
+    {'id': 15, 'name_en': 'Bring Book Closer', 'name_pt': 'Aproximar Livro', 'video': 'bring_book_closer.mp4', 'target_muscle': 'Biceps'},
+    {'id': 16, 'name_en': 'Lower Book', 'name_pt': 'Pousar Livro', 'video': 'lower_book.mp4', 'target_muscle': 'Triceps'},
+]
+
+DOOR_KNOB_STEPS = [
+    EXERCISE_STEPS_TEMPLATE[0], # Rest
+    {'id': 17, 'name_en': 'Reach for Door Knob', 'name_pt': 'Alcançar Maçaneta', 'video': 'reach_knob.mp4', 'target_muscle': 'Biceps'},
+    {'id': 18, 'name_en': 'Grasp Door Knob', 'name_pt': 'Agarrar Maçaneta', 'video': 'grasp_knob.mp4', 'target_muscle': 'Pronator'},
+    {'id': 19, 'name_en': 'Turn Door Knob', 'name_pt': 'Rodar Maçaneta', 'video': 'turn_knob.mp4', 'target_muscle': 'Pronator'},
+    {'id': 20, 'name_en': 'Release Door Knob', 'name_pt': 'Largar Maçaneta', 'video': 'release_knob.mp4', 'target_muscle': 'Extensors'},
+    {'id': 21, 'name_en': 'Retract Hand', 'name_pt': 'Recuar Mão', 'video': 'retract_hand_knob.mp4', 'target_muscle': 'Biceps'},
 ]
 
 # --- Text Strings (internationalization) ---
@@ -151,6 +181,9 @@ STRINGS = {
         'sequence_cup_name': "Cup Sequence",
         'sequence_rest_only_name': "Rest Only",
         'sequence_short_name': "Short Sequence",
+        'sequence_soup_name': "Soup Sequence",
+        'sequence_grab_book_name': "Book Grab Sequence",
+        'sequence_turn_door_knob_name': "Open Door Sequence",
         # Summary Report
         'button_create_summary': "Create Summary",
         'summary_report_title': "Patient Summary Report",
@@ -226,6 +259,9 @@ STRINGS = {
         'sequence_cup_name': "Sequência do Copo",
         'sequence_rest_only_name': "Apenas Descanso",
         'sequence_short_name': "Sequência Curta",
+        'sequence_soup_name': "Sequência da Sopa",
+        'sequence_grab_book_name': "Sequência Alcançar Livro",
+        'sequence_turn_door_knob_name': "Sequência Abrir Porta",
         # Summary Report
         'button_create_summary': "Criar Resumo",
         'summary_report_title': "Relatório Resumo do Paciente",
@@ -263,9 +299,12 @@ SOUND_MAP = {
 # --- Exercise Sequences Definition ---
 EXERCISE_SEQUENCES = {
     # Internal Key : (Translatable String Key for Name, Steps List)
-    'Cup Sequence': ('sequence_cup_name', EXERCISE_STEPS_TEMPLATE),
     'Rest Only': ('sequence_rest_only_name', [EXERCISE_STEPS_TEMPLATE[0]]),
-    'Short Sequence': ('sequence_short_name', EXERCISE_STEPS_TEMPLATE[:3])
+    'Cup Sequence': ('sequence_cup_name', EXERCISE_STEPS_TEMPLATE),
+    'Short Sequence': ('sequence_short_name', EXERCISE_STEPS_TEMPLATE[:3]),
+    'Soup Sequence': ('sequence_soup_name', SOUP_STEPS),
+    'Book Grab Sequence': ('sequence_grab_book_name', BOOK_GRAB_STEPS),
+    'Turn Door Knob Sequence': ('sequence_turn_door_knob_name', DOOR_KNOB_STEPS) 
 }
 
 # --- Worker Thread ---
@@ -282,7 +321,8 @@ class EMGProcessingWorker(QObject): # Keep as is
                 intensity = 0.0
                 if status == 'CORRECT_WEAK': intensity = random.uniform(0.2, 0.5)
                 elif status == 'CORRECT_STRONG': intensity = random.uniform(0.55, 1.0)
-                plot_data = [random.gauss(0, 0.1) + (intensity * 0.5 if status.startswith('CORRECT') else 0) for _ in range(100)]
+                plot_data = nk.emg_simulate(duration=2, sampling_rate=1000, burst_number=1) if status.startswith('CORRECT') else 0
+                # plot_data = [random.gauss(0, 0.1) + (intensity * 0.5 if status.startswith('CORRECT') else 0) for _ in range(100)]
                 result = {'status': status, 'intensity': intensity, 'plot_data': plot_data, 'timestamp': time.time()}
                 self.new_result.emit(result)
             else: time.sleep(0.02)
