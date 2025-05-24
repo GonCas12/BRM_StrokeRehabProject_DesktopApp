@@ -1,163 +1,145 @@
-import os
-import sys
-import time
 import subprocess
+import os
 import signal
+import time
 import threading
-from PyQt5.QtCore import QObject, pyqtSignal as Signal, pyqtSlot as Slot
+from PyQt5.QtCore import QObject, pyqtSignal
 
 class EMGBridgeManager(QObject):
     """
-    Manages the DAQ-to-ZMQ bridge process from within the application.
-    This allows starting and stopping EMG data collection from the GUI.
+    Manages the external DAQ-to-ZMQ bridge process without blocking the UI
     """
-    status_changed = Signal(str)  # Signal to update UI with bridge status
+    status_changed = pyqtSignal(str)
     
-    def __init__(self, bridge_script_path=None):
+    def __init__(self):
         super().__init__()
-        # Find the bridge script path
-        if bridge_script_path is None:
-            # Assume the bridge script is in the same directory as this file
-            self.bridge_script_path = os.path.join(
-                os.path.dirname(os.path.abspath(__file__)), 
-                "daq_to_zmq_bridge.py"
-            )
-        else:
-            self.bridge_script_path = bridge_script_path
-            
         self.bridge_process = None
         self.is_running = False
-        self.monitor_thread = None
-        
-    def start_bridge(self, simulate=False, device="Dev1", channels="ai0:3", 
-                    rate=1000, port=5555, no_filter=False):
-        """
-        Start the DAQ-to-ZMQ bridge process.
-        
-        Args:
-            simulate (bool): Whether to use simulated EMG data
-            device (str): DAQ device name
-            channels (str): DAQ channel string (e.g., ai0:3)
-            rate (int): Sampling rate in Hz
-            port (int): ZMQ publisher port
-            no_filter (bool): Disable EMG filtering
-        
-        Returns:
-            bool: True if process started successfully, False otherwise
-        """
+        self.process_output_thread = None
+        self.terminate_flag = False
+    
+    def start_bridge(self, simulate=True, movement_file=None):
+        """Start the DAQ-to-ZMQ bridge process"""
         if self.is_running:
-            self.status_changed.emit("Bridge already running")
+            self.status_changed.emit("Already running")
             return True
             
-        # Build command with arguments
-        cmd = [sys.executable, self.bridge_script_path]
-        if simulate:
-            cmd.append("--simulate")
-        cmd.extend(["--device", device])
-        cmd.extend(["--channels", channels])
-        cmd.extend(["--rate", str(rate)])
-        cmd.extend(["--port", str(port)])
-        if no_filter:
-            cmd.append("--no-filter")
-            
-        # Start the bridge process
         try:
-            # Use subprocess.Popen to start the process
+            # First kill any existing processes
+            print("Checking for existing bridge processes...")
+            try:
+                subprocess.run(['python', 'kill_zmq_bridges.py'], 
+                            timeout=5, 
+                            check=False,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE)
+            except Exception as e:
+                print(f"Error running cleanup script: {e}")
+            
+            # Give the system time to fully release resources
+            time.sleep(1)
+            
+            # Now start the bridge
+            cmd = ['python', 'run_mock_daq_test.py', '--mock']
+            
+            # Add pre-recorded file if provided
+            if movement_file:
+                cmd.extend(['--file', movement_file])
+            
+            # Start the process
+            print(f"Starting bridge with command: {' '.join(cmd)}")
             self.bridge_process = subprocess.Popen(
-                cmd,
+                cmd, 
                 stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
                 text=True,
-                bufsize=1  # Line buffered
+                bufsize=1,
+                universal_newlines=True
             )
             
-            # Start a thread to monitor the process output
-            self.monitor_thread = threading.Thread(
-                target=self._monitor_process,
+            # Start thread to handle output without blocking
+            self.terminate_flag = False
+            self.process_output_thread = threading.Thread(
+                target=self._monitor_process_output,
                 daemon=True
             )
-            self.monitor_thread.start()
+            self.process_output_thread.start()
             
-            # Wait a moment to check if process started successfully
-            time.sleep(0.5)
-            if self.bridge_process.poll() is not None:
-                # Process exited immediately
-                return_code = self.bridge_process.poll()
-                stderr = self.bridge_process.stderr.read()
-                self.status_changed.emit(f"Failed to start bridge: Exit code {return_code}\n{stderr}")
-                self.bridge_process = None
+            # Give it a moment to start up
+            time.sleep(1)
+            
+            if self.bridge_process.poll() is None:
+                self.is_running = True
+                self.status_changed.emit("Running")
+                return True
+            else:
+                self.status_changed.emit("Failed to start")
                 return False
                 
-            self.is_running = True
-            self.status_changed.emit("Bridge started successfully")
-            return True
-            
         except Exception as e:
-            self.status_changed.emit(f"Error starting bridge: {e}")
-            if self.bridge_process:
-                try:
-                    self.bridge_process.terminate()
-                except:
-                    pass
-                self.bridge_process = None
+            self.status_changed.emit(f"Error: {str(e)}")
             return False
-            
+    
+    def _monitor_process_output(self):
+        """Monitor process output in a separate thread"""
+        while self.bridge_process and not self.terminate_flag:
+            if self.bridge_process.poll() is not None:
+                # Process has terminated
+                if not self.terminate_flag:  # Only emit if not manually terminated
+                    self.is_running = False
+                    self.status_changed.emit("Terminated unexpectedly")
+                break
+                
+            # Read output without blocking
+            try:
+                output_line = self.bridge_process.stdout.readline()
+                if output_line:
+                    print(f"Bridge output: {output_line.strip()}")
+                else:
+                    # No more output but process still running
+                    time.sleep(0.1)
+            except:
+                time.sleep(0.1)
+                
+        print("Process output monitoring stopped")
+    
     def stop_bridge(self):
         """Stop the DAQ-to-ZMQ bridge process"""
-        if not self.is_running or self.bridge_process is None:
-            self.status_changed.emit("Bridge not running")
+        if not self.is_running or not self.bridge_process:
+            self.status_changed.emit("Not running")
             return True
-            
+        
         try:
-            # Send SIGTERM signal to gracefully terminate the process
-            if sys.platform == 'win32':
-                self.bridge_process.terminate()
-            else:
-                os.kill(self.bridge_process.pid, signal.SIGTERM)
-                
-            # Wait for process to terminate
-            for _ in range(10):
+            # Signal thread to stop
+            self.terminate_flag = True
+            
+            # Terminate process
+            print("Stopping EMG bridge...")
+            self.bridge_process.terminate()
+            
+            # Give it a moment to terminate
+            for _ in range(10):  # Wait up to 1 second
                 if self.bridge_process.poll() is not None:
                     break
                 time.sleep(0.1)
-                
-            # Force kill if not terminated
+            
+            # Force kill if still running
             if self.bridge_process.poll() is None:
-                if sys.platform == 'win32':
-                    self.bridge_process.kill()
-                else:
+                print("Bridge didn't terminate gracefully, forcing kill...")
+                if os.name == 'nt':  # Windows
+                    os.kill(self.bridge_process.pid, signal.CTRL_BREAK_EVENT)
+                else:  # Unix/Linux
                     os.kill(self.bridge_process.pid, signal.SIGKILL)
-                    
-            self.is_running = False
+            
+            # Wait for monitoring thread to finish
+            if self.process_output_thread and self.process_output_thread.is_alive():
+                self.process_output_thread.join(timeout=2.0)
+                
             self.bridge_process = None
-            self.status_changed.emit("Bridge stopped")
+            self.is_running = False
+            self.status_changed.emit("Stopped")
             return True
             
         except Exception as e:
-            self.status_changed.emit(f"Error stopping bridge: {e}")
+            self.status_changed.emit(f"Error stopping: {str(e)}")
             return False
-            
-    def _monitor_process(self):
-        """Monitor the bridge process output"""
-        try:
-            # Read process output line by line
-            for line in iter(self.bridge_process.stdout.readline, ''):
-                if line:
-                    # Forward important messages to UI
-                    line = line.strip()
-                    if "Error" in line or "WARNING" in line or "DAQ" in line:
-                        self.status_changed.emit(line)
-                else:
-                    break
-                    
-            # Process has ended
-            if self.bridge_process:
-                return_code = self.bridge_process.poll()
-                if return_code is not None and return_code != 0:
-                    stderr = self.bridge_process.stderr.read()
-                    self.status_changed.emit(f"Bridge exited with code {return_code}\n{stderr}")
-                self.is_running = False
-                
-        except Exception as e:
-            self.status_changed.emit(f"Error monitoring bridge: {e}")
-            self.is_running = False

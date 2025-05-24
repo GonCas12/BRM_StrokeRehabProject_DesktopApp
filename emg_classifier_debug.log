@@ -1,0 +1,11 @@
+=== EMG Classifier Debug Log ===
+Started: 2025-05-24 19:43:53
+
+[19:43:53.444] INFO: Mock DAQ: Loaded pre-recorded data from 'SS01_T1_emgData_Rest_Biceps_FDS_20250523_113024.npy'
+[19:43:53.444] INFO: Mock DAQ: Using cached pre-recorded data ((2, 22600))
+[19:44:11.649] INFO: Mock DAQ: Loaded pre-recorded data from 'SS01_T6_emgData_Flexion_Biceps_FDS_20250523_113237.npy'
+[19:44:11.650] INFO: Mock DAQ: Using cached pre-recorded data ((2, 21300))
+[19:44:29.857] INFO: Mock DAQ: Loaded pre-recorded data from 'SS01_T1_emgData_Extension_Biceps_FDS_20250523_113640.npy'
+[19:44:29.857] INFO: Mock DAQ: Using cached pre-recorded data ((2, 9400))
+[19:44:48.049] INFO: Mock DAQ: Loaded pre-recorded data from 'SS01_T1_emgData_Rest_Biceps_FDS_20250523_113024.npy'
+[19:44:48.050] INFO: Mock DAQ: Using cached pre-recorded data ((2, 22600))

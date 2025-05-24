@@ -366,10 +366,29 @@ SOUND_MAP = {
 
 # --- Exercise Sequences Definition ---
 EXERCISE_SEQUENCES = {
-    # Internal Key : (Translatable String Key for Name, Steps List)
-    'Cup Sequence': ('sequence_cup_name', EXERCISE_STEPS_TEMPLATE),
-    'Rest Only': ('sequence_rest_only_name', [EXERCISE_STEPS_TEMPLATE[0]]),
-    'Short Sequence': ('sequence_short_name', EXERCISE_STEPS_TEMPLATE[:3])
+    "cup_movement": ("exercise_cup_movement", [
+        {
+            "id": "cup_rest",
+            "name_en": "Rest position",
+            "name_pt": "Posição de descanso",
+            "video": "rest.mp4",
+            "expected_movement": "Rest"  # Expected movement type
+        },
+        {
+            "id": "cup_grab",
+            "name_en": "Grab the cup",
+            "name_pt": "Agarre o copo",
+            "video": "grasp_cup.mp4",
+            "expected_movement": "Flexion"  # Expected movement type
+        },
+        {
+            "id": "cup_release",
+            "name_en": "Release the cup",
+            "name_pt": "Solte o copo",
+            "video": "reach_cup.mp4",
+            "expected_movement": "Extension"  # Expected movement type
+        }
+    ])
 }
 
 # --- Worker Thread ---
@@ -422,6 +441,7 @@ class EMGZmqReceiver:
 
 class EMGProcessingWorker(QObject):
     new_result = Signal(dict)
+    movement_detected = Signal(str, float)  # Movement type, confidence
     stopped = Signal()
     
     def __init__(self, zmq_port=5555):
@@ -431,19 +451,49 @@ class EMGProcessingWorker(QObject):
         self.zmq_context = None
         self.zmq_socket = None
         
+        # Movement tracking
+        self.current_movement = "Rest"
+        self.movement_start_time = None
+        self.movement_threshold = 0.65  # Confidence threshold
+        self.min_duration_s = 0.3  # Minimum duration for a valid movement
+        
     def _setup_zmq(self):
-        """Setup ZMQ connection to receive EMG data"""
-        try:
-            self.zmq_context = zmq.Context()
-            self.zmq_socket = self.zmq_context.socket(zmq.SUB)
-            self.zmq_socket.setsockopt_string(zmq.SUBSCRIBE, "")
-            self.zmq_socket.connect(f"tcp://localhost:{self.zmq_port}")
-            self.zmq_socket.RCVTIMEO = 100  # Set timeout to 100ms
-            print(f"ZMQ subscriber connected to port {self.zmq_port}")
-            return True
-        except Exception as e:
-            print(f"Error setting up ZMQ: {e}")
-            return False
+        """Setup ZMQ connection to receive EMG data with retry mechanism"""
+        
+        # Track retry attempts
+        for attempt in range(3):
+            try:
+                # Clean up any existing connection
+                if hasattr(self, 'zmq_socket') and self.zmq_socket:
+                    try:
+                        self.zmq_socket.close()
+                    except:
+                        pass
+                if hasattr(self, 'zmq_context') and self.zmq_context:
+                    try:
+                        self.zmq_context.term()
+                    except:
+                        pass
+                
+                # Create new connection
+                self.zmq_context = zmq.Context()
+                self.zmq_socket = self.zmq_context.socket(zmq.SUB)
+                self.zmq_socket.setsockopt_string(zmq.SUBSCRIBE, "")
+                self.zmq_socket.connect(f"tcp://localhost:{self.zmq_port}")
+                self.zmq_socket.RCVTIMEO = 100  # Set timeout to 100ms
+                print(f"ZMQ subscriber connected to port {self.zmq_port}")
+                
+                # Give the connection a moment to establish
+                time.sleep(0.5)
+                print("ZMQ connection established successfully")
+                return True
+                
+            except Exception as e:
+                print(f"ZMQ setup attempt {attempt+1} failed: {e}")
+                time.sleep(1)  # Wait before retrying
+        
+        print("Failed to set up ZMQ connection after multiple attempts")
+        return False
     
     def _cleanup_zmq(self):
         """Clean up ZMQ resources"""
@@ -459,16 +509,96 @@ class EMGProcessingWorker(QObject):
         self.running = True
         print("Worker thread started.")
         
-        # Setup ZMQ connection if not simulating EMG
-        use_zmq = not SIMULATE_EMG
-        zmq_connected = False
+        # Setup ZMQ connection
+        zmq_connected = self._setup_zmq()
+        if zmq_connected:
+            print("ZMQ connection established successfully")
+        else:
+            print("WARNING: ZMQ connection failed")
         
-        if use_zmq:
-            zmq_connected = self._setup_zmq()
+        msg_count = 0
+        last_time = time.time()
         
         while self.running:
-            if SIMULATE_EMG:
-                # Original simulation code
+            if zmq_connected:
+                # Read data from ZMQ
+                try:
+                    message = self.zmq_socket.recv_string()
+                    data = json.loads(message)
+                    
+                    # Get movement type and confidence
+                    movement_type = data.get('movement', 'Rest')
+                    confidence = float(data.get('confidence', 0.0))
+                    intensity = float(data.get('intensity', 0.0))
+                    
+                    # Track movement state changes
+                    if movement_type != self.current_movement:
+                        # If changing to a non-Rest movement with sufficient confidence
+                        if movement_type != "Rest" and confidence >= self.movement_threshold:
+                            # Starting a new movement
+                            if self.current_movement == "Rest":
+                                self.movement_start_time = time.time()
+                                print(f"Starting movement: {movement_type}")
+                            else:
+                                # Transitioning between movements
+                                print(f"Changing movement: {self.current_movement} -> {movement_type}")
+                                
+                                # Complete the previous movement if it lasted long enough
+                                if self.movement_start_time is not None:
+                                    duration = time.time() - self.movement_start_time
+                                    if duration >= self.min_duration_s:
+                                        print(f"Completed movement: {self.current_movement} ({duration:.2f}s)")
+                                        self.movement_detected.emit(self.current_movement, confidence)
+                                
+                                # Start tracking the new movement
+                                self.movement_start_time = time.time()
+                            
+                        elif movement_type == "Rest" and self.current_movement != "Rest":
+                            # Completing a movement
+                            if self.movement_start_time is not None:
+                                duration = time.time() - self.movement_start_time
+                                if duration >= self.min_duration_s:
+                                    print(f"Completed movement: {self.current_movement} ({duration:.2f}s)")
+                                    self.movement_detected.emit(self.current_movement, confidence)
+                            
+                            self.movement_start_time = None
+                        
+                        # Update current movement
+                        self.current_movement = movement_type
+                    
+                    # Map ZMQ status to app status
+                    if movement_type == 'Rest':
+                        status = 'NO_MOVEMENT'
+                    else:
+                        # Active movement detected
+                        if intensity >= 0.5:
+                            status = 'CORRECT_STRONG'
+                        else:
+                            status = 'CORRECT_WEAK'
+                    
+                    # Create the result dict for the app
+                    result = {
+                        'status': status,
+                        'intensity': intensity,
+                        'plot_data': data.get('plot_data', [0.0] * 100),
+                        'timestamp': data.get('timestamp', time.time()),
+                        'movement': movement_type,
+                        'confidence': confidence
+                    }
+                    
+                    # Emit the result to update the UI
+                    self.new_result.emit(result)
+                    
+                except zmq.error.Again:
+                    # Timeout waiting for message
+                    time.sleep(0.01)
+                    continue
+                except Exception as e:
+                    print(f"Error receiving ZMQ data: {e}")
+                    time.sleep(0.1)
+                    continue
+            else:
+                # No ZMQ connection, generate simulated data
                 time.sleep(SIMULATION_DELAY_S)
                 status = random.choices(POSSIBLE_STATUSES, weights=STATUS_WEIGHTS, k=1)[0]
                 intensity = 0.0
@@ -485,53 +615,12 @@ class EMGProcessingWorker(QObject):
                     'timestamp': time.time()
                 }
                 self.new_result.emit(result)
-                
-            elif use_zmq and zmq_connected:
-                # Read data from ZMQ
-                try:
-                    message = self.zmq_socket.recv_string()
-                    data = json.loads(message)
-                    
-                    # Map ZMQ status to app status
-                    zmq_status = data.get('status', 'idle')
-                    intensity = data.get('intensity', 0.0)
-                    
-                    # Map ZMQ status to app status format
-                    if zmq_status == 'idle':
-                        status = 'IDLE'
-                    elif zmq_status == 'active':
-                        if intensity < 0.5:
-                            status = 'CORRECT_WEAK'
-                        else:
-                            status = 'CORRECT_STRONG'
-                    else:
-                        status = zmq_status.upper()
-                    
-                    # Format the result as expected by the application
-                    result = {
-                        'status': status,
-                        'intensity': intensity,
-                        'plot_data': data.get('plot_data', [0.0] * 100),
-                        'timestamp': data.get('timestamp', time.time())
-                    }
-                    
-                    self.new_result.emit(result)
-                    
-                except zmq.error.Again:
-                    # Timeout waiting for message, continue the loop
-                    time.sleep(0.01)
-                except Exception as e:
-                    print(f"Error receiving ZMQ data: {e}")
-                    time.sleep(0.1)
             
-            else:
-                time.sleep(0.02)
-                
-            if not self.running:
-                break
-                
+            # Small delay to prevent CPU hammering
+            time.sleep(0.01)
+            
         # Clean up
-        if use_zmq and zmq_connected:
+        if zmq_connected:
             self._cleanup_zmq()
             
         print("Worker thread stopping.")
@@ -815,7 +904,7 @@ class MainWindow(QMainWindow): # Keep as is
         self.plot_widget = pg.PlotWidget(title="EMG Signal (Simulated)")
         self.plot_widget.setYRange(-1, 1)
         self.plot_widget.showGrid(x=False, y=True)
-        self.emg_curve = self.plot_widget.plot(pen='y') # EMG plot line
+        self.emg_curve = self.plot_widget.plot(pen='b') # EMG plot line
         ex_top_layout.addWidget(self.plot_widget, stretch=2)
 
         # Info part: Step Label + Instructions
@@ -980,76 +1069,64 @@ class MainWindow(QMainWindow): # Keep as is
             else: print(f" -> Warning: Sound {sound_key} not loaded. Attempting play anyway..."); sound_to_play.play()
 
     def setup_emg_controls(self):
-        """Set up EMG data acquisition controls"""
-        # Create a frame/group for EMG controls
-        emg_frame = QFrame(self)
+        """Set up simplified EMG data acquisition controls"""
+        # Create a frame for EMG controls
+        emg_frame = QFrame()
         emg_frame.setFrameStyle(QFrame.StyledPanel | QFrame.Raised)
         emg_layout = QVBoxLayout(emg_frame)
         emg_layout.setContentsMargins(10, 10, 10, 10)
         
         # Title label
-        title_label = QLabel("EMG Data Acquisition", emg_frame)
+        title_label = QLabel("EMG Data Acquisition")
         title_label.setStyleSheet("font-weight: bold;")
         emg_layout.addWidget(title_label)
         
-        # DAQ device selection
-        device_layout = QHBoxLayout()
-        device_label = QLabel("DAQ Device:", emg_frame)
-        self.device_combo = QComboBox(emg_frame)
-        self.device_combo.addItems(["Dev1", "Dev2", "Dev3"])
-        device_layout.addWidget(device_label)
-        device_layout.addWidget(self.device_combo)
-        emg_layout.addLayout(device_layout)
-        
-        # Channel selection
-        channels_layout = QHBoxLayout()
-        channels_label = QLabel("Channels:", emg_frame)
-        self.channels_edit = QLineEdit(emg_frame)
-        self.channels_edit.setText("ai0:3")  # Default to 4 channels
-        channels_layout.addWidget(channels_label)
-        channels_layout.addWidget(self.channels_edit)
-        emg_layout.addLayout(channels_layout)
-        
-        # Simulation mode
-        self.simulate_check = QCheckBox("Use simulated EMG data", emg_frame)
-        emg_layout.addWidget(self.simulate_check)
-        
         # Start/Stop button
         button_layout = QHBoxLayout()
-        self.emg_start_button = QPushButton("Start EMG Acquisition", emg_frame)
+        self.emg_start_button = QPushButton("Start EMG Acquisition")
         self.emg_start_button.clicked.connect(self.toggle_emg_acquisition)
         button_layout.addWidget(self.emg_start_button)
         emg_layout.addLayout(button_layout)
         
         # Status label
-        self.emg_status_label = QLabel("EMG Status: Not running", emg_frame)
+        self.emg_status_label = QLabel("EMG Status: Not running")
         emg_layout.addWidget(self.emg_status_label)
         
-        # Add the frame to your main layout
-        # Depending on your UI structure:
-        self.layout().addWidget(emg_frame)  # or main_layout.addWidget(emg_frame)
-        
+        # Add the frame to the main layout at the bottom
+        # Find the main layout in your UI structure
+        central_widget = self.centralWidget()
+        if central_widget and central_widget.layout():
+            central_widget.layout().addWidget(emg_frame)
+
     def toggle_emg_acquisition(self):
-        """Start or stop EMG data acquisition"""
+        """Start or stop EMG data acquisition with PySide6 compatibility"""
         if self.emg_bridge.is_running:
             # Stop the bridge
-            self.emg_bridge.stop_bridge()
-            self.emg_start_button.setEnabled(False)  # Temporarily disable while stopping
+            self.emg_start_button.setEnabled(False)  # Temporarily disable
+            self.emg_status_label.setText("EMG Status: Stopping...")
+            
+            # Use a thread to stop the bridge without blocking the UI
+            def stop_bridge_thread():
+                self.emg_bridge.stop_bridge()
+                # Use QTimer for thread-safe UI updates
+                from PySide6.QtCore import QTimer
+                QTimer.singleShot(0, lambda: self.emg_start_button.setEnabled(True))
+            
+            threading.Thread(target=stop_bridge_thread, daemon=True).start()
         else:
             # Start the bridge
-            device = self.device_combo.currentText()
-            channels = self.channels_edit.text()
-            simulate = self.simulate_check.isChecked()
+            self.emg_start_button.setEnabled(False)  # Temporarily disable
+            self.emg_status_label.setText("EMG Status: Starting...")
             
-            self.emg_start_button.setEnabled(False)  # Temporarily disable while starting
-            success = self.emg_bridge.start_bridge(
-                simulate=simulate,
-                device=device,
-                channels=channels
-            )
+            # Use a thread to start the bridge without blocking the UI
+            def start_bridge_thread():
+                success = self.emg_bridge.start_bridge()
+                # Use QTimer for thread-safe UI updates
+                from PySide6.QtCore import QTimer
+                QTimer.singleShot(0, lambda: self.emg_start_button.setEnabled(True))
             
-            if not success:
-                self.emg_start_button.setEnabled(True)
+            threading.Thread(target=start_bridge_thread, daemon=True).start()
+
                 
     def on_bridge_status_changed(self, status):
         """Update UI based on bridge status"""
@@ -1187,7 +1264,7 @@ class MainWindow(QMainWindow): # Keep as is
         self.current_step_index += 1
         self.load_step()
 
-    def send_robot_command(self, step_id, intensity): # Keep as is
+    def send_robot_command(self, step_id, intensity): # Keep as isZXC
         if self.arduino and self.arduino.is_open:
             velocity = int(min(max(intensity * 255, 0), 255)); command = f"<{step_id}:{velocity}>\n"
             try: self.arduino.write(command.encode('utf-8')); print(f"Sent to Arduino: {command.strip()}")
