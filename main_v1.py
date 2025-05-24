@@ -327,7 +327,7 @@ class EMGProcessingWorker(QObject): # Keep as is
                 intensity = 0.0
                 if status == 'CORRECT_WEAK': intensity = random.uniform(0.2, 0.5)
                 elif status == 'CORRECT_STRONG': intensity = random.uniform(0.55, 1.0)
-                plot_data = nk.emg_simulate(duration=2, sampling_rate=1000, burst_number=1) if status.startswith('CORRECT') else 0
+                plot_data = nk.emg_simulate(duration=2, sampling_rate=1000, burst_number=1) if status.startswith('CORRECT') else []
                 # plot_data = [random.gauss(0, 0.1) + (intensity * 0.5 if status.startswith('CORRECT') else 0) for _ in range(100)]
                 result = {'status': status, 'intensity': intensity, 'plot_data': plot_data, 'timestamp': time.time()}
                 self.new_result.emit(result)
