@@ -52,18 +52,21 @@ import serial
 import neurokit2 as nk
 
 # --- Configuration ---
-APP_TITLE = "Stroke Rehabilitation Assistant"
 UPDATE_INTERVAL_MS = 100
+ADVANCE_DELAY_MS = 2000 # Time that it takes to move to next movement after CORRECT_MOVEMENT
+SERIAL_PORT = "COM3" # Serial Port that Connects to Arduino
+BAUD_RATE = 9600 # Correspond to the Baud Rate (taxa transmissão) of Arduino Code
+# --- Don't Change Further Code
+
+APP_TITLE = "Stroke Rehabilitation Assistant"
 LANGUAGES = ['en', 'pt']
 DEFAULT_LANGUAGE = 'en'
-ADVANCE_DELAY_MS = 500
-SERIAL_PORT = "COM3"
-BAUD_RATE = 9600
-SIMULATE_EMG = True
-SIMULATION_DELAY_S = 2
-POSSIBLE_STATUSES = ['NO_MOVEMENT', 'INCORRECT_MOVEMENT', 'CORRECT_WEAK', 'CORRECT_STRONG']
-STATUS_WEIGHTS = [0.3, 0.2, 0.3, 0.2]
 
+# EMG Simulation
+SIMULATE_EMG = True
+SIMULATION_DELAY_S = 2 # Time between New Simulated Signal
+POSSIBLE_STATUSES = ['NO_MOVEMENT', 'INCORRECT_MOVEMENT', 'CORRECT_WEAK', 'CORRECT_STRONG']
+STATUS_WEIGHTS = [0.3, 0.2, 0.3, 0.2] # Proabilities of ocurring status in the simulation
 
 def resource_path(relative_path):
     """ Get absolute path to resource, works for dev and for PyInstaller """
