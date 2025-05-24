@@ -307,7 +307,7 @@ EXERCISE_SEQUENCES = {
     # Internal Key : (Translatable String Key for Name, Steps List)
     'Rest Only': ('sequence_rest_only_name', [EXERCISE_STEPS_TEMPLATE[0]]),
     'Cup Sequence': ('sequence_cup_name', EXERCISE_STEPS_TEMPLATE),
-    'Short Sequence': ('sequence_short_name', EXERCISE_STEPS_TEMPLATE[:3]),
+    # 'Short Sequence': ('sequence_short_name', EXERCISE_STEPS_TEMPLATE[:3]),
     'Soup Sequence': ('sequence_soup_name', SOUP_STEPS),
     'Book Grab Sequence': ('sequence_grab_book_name', BOOK_GRAB_STEPS),
     'Turn Door Knob Sequence': ('sequence_turn_door_knob_name', DOOR_KNOB_STEPS) 
@@ -325,10 +325,19 @@ class EMGProcessingWorker(QObject): # Keep as is
                 time.sleep(SIMULATION_DELAY_S)
                 status = random.choices(POSSIBLE_STATUSES, weights=STATUS_WEIGHTS, k=1)[0]
                 intensity = 0.0
-                if status == 'CORRECT_WEAK': intensity = random.uniform(0.2, 0.5)
-                elif status == 'CORRECT_STRONG': intensity = random.uniform(0.55, 1.0)
-                plot_data = nk.emg_simulate(duration=2, sampling_rate=1000, burst_number=1) if status.startswith('CORRECT') else []
-                # plot_data = [random.gauss(0, 0.1) + (intensity * 0.5 if status.startswith('CORRECT') else 0) for _ in range(100)]
+                if status == POSSIBLE_STATUSES[2]: #CORRECT_WEAK 
+                    intensity = random.uniform(0.2, 0.5)
+                    plot_data = nk.emg_simulate(duration=2, sampling_rate=1000, burst_number=1)/10
+
+                elif status == POSSIBLE_STATUSES[3]: #CORRECT_STRONG
+                    intensity = random.uniform(0.55, 1.0)
+                    plot_data = nk.emg_simulate(duration=2, sampling_rate=1000, burst_number=1)
+
+                elif status == POSSIBLE_STATUSES[1]: # INCORRECT_MOVEMENT
+                    plot_data = [random.gauss(0, 0.1) + (intensity * 0.5) for _ in range(100)]
+                
+                elif status == POSSIBLE_STATUSES[0]: #NO_MOVEMENT
+                    plot_data = []
                 result = {'status': status, 'intensity': intensity, 'plot_data': plot_data, 'timestamp': time.time()}
                 self.new_result.emit(result)
             else: time.sleep(0.02)
