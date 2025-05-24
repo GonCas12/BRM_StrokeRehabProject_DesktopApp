@@ -89,40 +89,40 @@ os.makedirs(OUTPUT_PATH, exist_ok=True)
 
 # --- Exercise Steps Definition ---
 EXERCISE_STEPS_TEMPLATE = [
-    {'id': 0, 'name_en': 'Rest', 'name_pt': 'Descansar', 'video': 'rest.mp4'},
-    {'id': 1, 'name_en': 'Reach for Cup', 'name_pt': 'Alcançar Copo', 'video': 'reach_cup.mp4', 'target_muscle': 'Biceps'},
-    {'id': 2, 'name_en': 'Grasp Cup', 'name_pt': 'Agarrar Copo', 'video': 'grasp_cup.mp4', 'target_muscle': 'Pronator'},
-    {'id': 3, 'name_en': 'Lift Cup', 'name_pt': 'Levantar Copo', 'video': 'lift_cup.mp4', 'target_muscle': 'Biceps'},
-    {'id': 4, 'name_en': 'Drink', 'name_pt': 'Beber', 'video': 'drink.mp4', 'target_muscle': 'Biceps'},
-    {'id': 5, 'name_en': 'Lower Cup', 'name_pt': 'Pousar Copo', 'video': 'lower_cup.mp4', 'target_muscle': 'Triceps'},
+    {'id': 0, 'name_en': 'Rest', 'name_pt': 'Descansar', 'video': 'rest.mp4', 'movement_type_en': 'Rest', 'movement_type_pt': 'Repouso'},
+    {'id': 1, 'name_en': 'Reach for Cup', 'name_pt': 'Alcançar Copo', 'video': 'reach_cup.mp4', 'movement_type_en': 'Pronation', 'movement_type_pt': 'Pronação'},
+    {'id': 2, 'name_en': 'Grasp Cup', 'name_pt': 'Agarrar Copo', 'video': 'grasp_cup.mp4', 'movement_type_en': 'Grasp', 'movement_type_pt': 'Agarrar'},
+    {'id': 3, 'name_en': 'Lift Cup', 'name_pt': 'Levantar Copo', 'video': 'lift_cup.mp4', 'movement_type_en': 'Flexion', 'movement_type_pt': 'Flexão'},
+    {'id': 4, 'name_en': 'Drink', 'name_pt': 'Beber', 'video': 'drink.mp4', 'movement_type_en': 'Pronation', 'movement_type_pt': 'Pronação'},
+    {'id': 5, 'name_en': 'Lower Cup', 'name_pt': 'Pousar Copo', 'video': 'lower_cup.mp4', 'movement_type_en': 'Extension', 'movement_type_pt': 'Extensão'},
 ]
 
 SOUP_STEPS = [
     EXERCISE_STEPS_TEMPLATE[0], # Rest
-    {'id': 6, 'name_en': 'Reach for Spoon', 'name_pt': 'Alcançar Colher', 'video': 'reach_spoon.mp4', 'target_muscle': 'Biceps'},
-    {'id': 7, 'name_en': 'Grasp Spoon', 'name_pt': 'Agarrar Colher', 'video': 'grasp_spoon.mp4', 'target_muscle': 'Pronator'},
-    {'id': 8, 'name_en': 'Scoop Soup', 'name_pt': 'Apanhar Sopa', 'video': 'scoop_soup.mp4', 'target_muscle': 'Biceps'},
-    {'id': 9, 'name_en': 'Bring Spoon to Mouth', 'name_pt': 'Levar Colher à Boca', 'video': 'bring_spoon_mouth.mp4', 'target_muscle': 'Biceps'},
-    {'id': 10, 'name_en': 'Return Spoon to Bowl', 'name_pt': 'Devolver Colher à Tigela', 'video': 'return_spoon_bowl.mp4', 'target_muscle': 'Triceps'},
-    {'id': 11, 'name_en': 'Lower Spoon', 'name_pt': 'Pousar Colher', 'video': 'lower_spoon.mp4', 'target_muscle': 'Triceps'},
+    {'id': 6, 'name_en': 'Reach for Spoon', 'name_pt': 'Alcançar Colher', 'video': 'reach_spoon.mp4', 'movement_type_en': 'Rest', 'movement_type_pt': 'Repouso'},
+    {'id': 7, 'name_en': 'Grasp Spoon', 'name_pt': 'Agarrar Colher', 'video': 'grasp_spoon.mp4', 'movement_type_en': 'Rest', 'movement_type_pt': 'Repouso'},
+    {'id': 8, 'name_en': 'Scoop Soup', 'name_pt': 'Apanhar Sopa', 'video': 'scoop_soup.mp4', 'movement_type_en': 'Rest', 'movement_type_pt': 'Repouso'},
+    {'id': 9, 'name_en': 'Bring Spoon to Mouth', 'name_pt': 'Levar Colher à Boca', 'video': 'bring_spoon_mouth.mp4', 'movement_type_en': 'Rest', 'movement_type_pt': 'Repouso'},
+    {'id': 10, 'name_en': 'Return Spoon to Bowl', 'name_pt': 'Devolver Colher à Tigela', 'video': 'return_spoon_bowl.mp4', 'movement_type_en': 'Rest', 'movement_type_pt': 'Repouso'},
+    {'id': 11, 'name_en': 'Lower Spoon', 'name_pt': 'Pousar Colher', 'video': 'lower_spoon.mp4', 'movement_type_en': 'Rest', 'movement_type_pt': 'Repouso'},
 ]
 
 BOOK_GRAB_STEPS = [
     EXERCISE_STEPS_TEMPLATE[0], # Rest
-    {'id': 12, 'name_en': 'Reach for Book', 'name_pt': 'Alcançar Livro', 'video': 'reach_book.mp4', 'target_muscle': 'Biceps'},
-    {'id': 13, 'name_en': 'Grasp Book', 'name_pt': 'Agarrar Livro', 'video': 'grasp_book.mp4', 'target_muscle': 'Pronator'},
-    {'id': 14, 'name_en': 'Lift Book', 'name_pt': 'Levantar Livro', 'video': 'lift_book.mp4', 'target_muscle': 'Biceps'},
-    {'id': 15, 'name_en': 'Bring Book Closer', 'name_pt': 'Aproximar Livro', 'video': 'bring_book_closer.mp4', 'target_muscle': 'Biceps'},
-    {'id': 16, 'name_en': 'Lower Book', 'name_pt': 'Pousar Livro', 'video': 'lower_book.mp4', 'target_muscle': 'Triceps'},
+    {'id': 12, 'name_en': 'Reach for Book', 'name_pt': 'Alcançar Livro', 'video': 'reach_book.mp4', 'movement_type_en': 'Rest', 'movement_type_pt': 'Repouso'},
+    {'id': 13, 'name_en': 'Grasp Book', 'name_pt': 'Agarrar Livro', 'video': 'grasp_book.mp4', 'movement_type_en': 'Rest', 'movement_type_pt': 'Repouso'},
+    {'id': 14, 'name_en': 'Lift Book', 'name_pt': 'Levantar Livro', 'video': 'lift_book.mp4', 'movement_type_en': 'Rest', 'movement_type_pt': 'Repouso'},
+    {'id': 15, 'name_en': 'Bring Book Closer', 'name_pt': 'Aproximar Livro', 'video': 'bring_book_closer.mp4', 'movement_type_en': 'Rest', 'movement_type_pt': 'Repouso'},
+    {'id': 16, 'name_en': 'Lower Book', 'name_pt': 'Pousar Livro', 'video': 'lower_book.mp4', 'movement_type_en': 'Rest', 'movement_type_pt': 'Repouso'},
 ]
 
 DOOR_KNOB_STEPS = [
     EXERCISE_STEPS_TEMPLATE[0], # Rest
-    {'id': 17, 'name_en': 'Reach for Door Knob', 'name_pt': 'Alcançar Maçaneta', 'video': 'reach_knob.mp4', 'target_muscle': 'Biceps'},
-    {'id': 18, 'name_en': 'Grasp Door Knob', 'name_pt': 'Agarrar Maçaneta', 'video': 'grasp_knob.mp4', 'target_muscle': 'Pronator'},
-    {'id': 19, 'name_en': 'Turn Door Knob', 'name_pt': 'Rodar Maçaneta', 'video': 'turn_knob.mp4', 'target_muscle': 'Pronator'},
-    {'id': 20, 'name_en': 'Release Door Knob', 'name_pt': 'Largar Maçaneta', 'video': 'release_knob.mp4', 'target_muscle': 'Extensors'},
-    {'id': 21, 'name_en': 'Retract Hand', 'name_pt': 'Recuar Mão', 'video': 'retract_hand_knob.mp4', 'target_muscle': 'Biceps'},
+    {'id': 17, 'name_en': 'Reach for Door Knob', 'name_pt': 'Alcançar Maçaneta', 'video': 'reach_knob.mp4', 'movement_type_en': 'Rest', 'movement_type_pt': 'Repouso'},
+    {'id': 18, 'name_en': 'Grasp Door Knob', 'name_pt': 'Agarrar Maçaneta', 'video': 'grasp_knob.mp4', 'movement_type_en': 'Rest', 'movement_type_pt': 'Repouso'},
+    {'id': 19, 'name_en': 'Turn Door Knob', 'name_pt': 'Rodar Maçaneta', 'video': 'turn_knob.mp4', 'movement_type_en': 'Rest', 'movement_type_pt': 'Repouso'},
+    {'id': 20, 'name_en': 'Release Door Knob', 'name_pt': 'Largar Maçaneta', 'video': 'release_knob.mp4', 'movement_type_en': 'Rest', 'movement_type_pt': 'Repouso'},
+    {'id': 21, 'name_en': 'Retract Hand', 'name_pt': 'Recuar Mão', 'video': 'retract_hand_knob.mp4', 'movement_type_en': 'Rest', 'movement_type_pt': 'Repouso'},
 ]
 
 # --- Text Strings (internationalization) ---
@@ -163,7 +163,9 @@ STRINGS = {
         'report_patient_header': "Patient",
         'report_sequence_name': "Exercise Sequence", 'report_total_duration': "Total Duration",
         'report_step_details_header': "Step Details", 'report_table_header_step_num': "Step #",
-        'report_table_header_name': "Name", 'report_table_header_time': "Time Taken (s)",
+        'report_table_header_name': "Name",
+        'report_table_header_movement_type': "Movement Type", 
+        'report_table_header_time': "Time Taken (s)",
         'report_table_header_incorrect': "Incorrect", 'report_table_header_weak': "Weak",
         'report_table_header_no_movement': "No Movement", 'report_table_header_manual_advance': "Manual Advance",
         'report_value_yes': "Yes", 'report_value_no': "No", 'report_value_na': "N/A",
@@ -196,6 +198,7 @@ STRINGS = {
         'summary_overall_step_no_incorrect_rate': "Overall Step Completion Rate (No Incorrect Attempts)",
         'summary_most_problematic_step': "Most Problematic Step (by total errors)",
         'summary_most_problematic_sequence': "Most Problematic Sequence (by total errors)",
+        'summary_movement_type_header': "Performance by Movement Type",
         'summary_sequence_performance_header': "Performance by Exercise Sequence",
         'summary_times_performed': "Times Performed",
         'graph_xlabel_date': "Date",
@@ -241,7 +244,9 @@ STRINGS = {
         'report_patient_header': "Paciente",
         'report_sequence_name': "Sequência de Exercício", 'report_total_duration': "Duração Total",
         'report_step_details_header': "Detalhes dos Passos", 'report_table_header_step_num': "Passo N.º",
-        'report_table_header_name': "Nome", 'report_table_header_time': "Tempo Gasto (s)",
+        'report_table_header_name': "Nome",
+        'report_table_header_movement_type': "Tipo de Movimento",
+        'report_table_header_time': "Tempo Gasto (s)",
         'report_table_header_incorrect': "Incorretas", 'report_table_header_weak': "Fracas",
         'report_table_header_no_movement': "Sem Movimento", 'report_table_header_manual_advance': "Avanço Manual",
         'report_value_yes': "Sim", 'report_value_no': "Não", 'report_value_na': "N/D",
@@ -274,6 +279,7 @@ STRINGS = {
         'summary_overall_step_no_incorrect_rate': "Taxa de Conclusão de Passo (Sem Tentativas Incorretas)",
         'summary_most_problematic_step': "Passo Mais Problemático (por total de erros)",
         'summary_most_problematic_sequence': "Sequência Mais problemática (por total de erros)",
+        'summary_movement_type_header': "Desempenho por Tipo de Movimento",
         'summary_sequence_performance_header': "Desempenho por Sequência de Exercício",
         'summary_times_performed': "Vezes Realizado",
         'graph_xlabel_date': "Data",
@@ -795,6 +801,8 @@ class MainWindow(QMainWindow): # Keep as is
             step_data = {
                 'step_id': completed_step_info['id'],
                 'step_name_en': completed_step_info['name_en'], 'step_name_pt': completed_step_info['name_pt'],
+                'movement_type_en': completed_step_info.get('movement_type_en', 'N/A'),
+                'movement_type_pt': completed_step_info.get('movement_type_pt', 'N/A'),
                 'time_taken_seconds': round(time_taken_for_step, 2),
                 'incorrect_attempts': self.current_step_attempts.get('INCORRECT_MOVEMENT', 0),
                 'weak_attempts': self.current_step_attempts.get('CORRECT_WEAK', 0),
@@ -820,6 +828,8 @@ class MainWindow(QMainWindow): # Keep as is
             step_data = {
                 'step_id': current_step_info['id'],
                 'step_name_en': current_step_info['name_en'], 'step_name_pt': current_step_info['name_pt'],
+                'movement_type_en': current_step_info.get('movement_type_en', 'N/A'),
+                'movement_type_pt': current_step_info.get('movement_type_pt', 'N/A'),
                 'time_taken_seconds': round(time_taken_for_step, 2),
                 'incorrect_attempts': self.current_step_attempts.get('INCORRECT_MOVEMENT', 0),
                 'weak_attempts': self.current_step_attempts.get('CORRECT_WEAK', 0),
@@ -938,8 +948,8 @@ class MainWindow(QMainWindow): # Keep as is
         md_content.append(f"**{self.tr('report_total_duration')}:** {total_duration_str}")
         md_content.append(f"\n## {self.tr('report_step_details_header')}")
 
-        md_content.append(f"| {self.tr('report_table_header_step_num')} | Step ID | Step Name (EN) | {self.tr('report_table_header_name')} | {self.tr('report_table_header_time')} | {self.tr('report_table_header_incorrect')} | {self.tr('report_table_header_weak')} | {self.tr('report_table_header_no_movement')} | {self.tr('report_table_header_manual_advance')} |")
-        md_content.append("|---|---|---|---|---|---|---|---|---|")
+        md_content.append(f"| {self.tr('report_table_header_step_num')} | Step ID | Step Name (EN) | {self.tr('report_table_header_name')} |  Movement Type (EN) | {self.tr('report_table_header_movement_type')} | {self.tr('report_table_header_time')} | {self.tr('report_table_header_incorrect')} | {self.tr('report_table_header_weak')} | {self.tr('report_table_header_no_movement')} | {self.tr('report_table_header_manual_advance')} |")
+        md_content.append("|---|---|---|---|---|---|---|---|---|---|---|")
 
         for i, step_data in enumerate(self.session_report_data):
             # Explicitly get the translated name based on self.current_language
@@ -950,9 +960,11 @@ class MainWindow(QMainWindow): # Keep as is
             
             step_id = step_data.get('step_id', 'N/A')
             step_name_en = step_data.get('step_name_en', 'N/A') # Canonical English name
+            movement_type_en_val = step_data.get('movement_type_en', 'N/A')
+            movement_type_lang_val = step_data.get(f'movement_type_{self.current_language}', movement_type_en_val)
             manually_advanced_str = self.tr('report_value_yes') if step_data.get('manually_advanced', False) else self.tr('report_value_no')
             
-            md_content.append(f"| {i+1} | {step_id} | {step_name_en} | {step_name_for_report_column} | {step_data['time_taken_seconds']:.2f} | "
+            md_content.append(f"| {i+1} | {step_id} | {step_name_en} | {step_name_for_report_column} | {movement_type_en_val} | {movement_type_lang_val} | {step_data['time_taken_seconds']:.2f} | "
                               f"{step_data['incorrect_attempts']} | {step_data['weak_attempts']} | "
                               f"{step_data['no_movement_attempts']} | {manually_advanced_str} |")
         try:

@@ -105,6 +105,8 @@ def parse_session_report(filepath, app_strings_dict):
         'Step ID',
         'Step Name (EN)',
         tr('report_table_header_name', detected_report_lang, app_strings_dict),
+        'Movement Type (EN)',
+        tr('report_table_header_movement_type', detected_report_lang, app_strings_dict),
         tr('report_table_header_time', detected_report_lang, app_strings_dict),
         tr('report_table_header_incorrect', detected_report_lang, app_strings_dict),
         tr('report_table_header_weak', detected_report_lang, app_strings_dict),
@@ -119,14 +121,16 @@ def parse_session_report(filepath, app_strings_dict):
     if table_match:
         table_content = content[table_match.end():] # Allows the search to be taken only in the part after the header
         step_pattern = re.compile(
-            r"\|\s*\d+\s*\|"                  # Step #
+            r"\|\s*\d+\s*\|"                      # Step #
             r"\s*([^|]*?)\s*\|"                   # Step ID
             r"\s*([^|]*?)\s*\|"                   # Step Name (EN)
             r"\s*([^|])*?\s*\|"                   # Translated Name (ignored)
-            r"\s*([\d\.]+)\s*\|"                # Time Taken
-            r"\s*(\d+)\s*\|"                     # Incorrect
-            r"\s*(\d+)\s*\|"                     # Weak
-            r"\s*(\d+)\s*\|"                     # No Movement
+            r"\s*([^|]*?)\s*\|"                   # Movement Type (EN)
+            r"\s*([^|])*?\s*\|"                   # Translated Movement Type (ignored) 
+            r"\s*([\d\.]+)\s*\|"                  # Time Taken
+            r"\s*(\d+)\s*\|"                      # Incorrect
+            r"\s*(\d+)\s*\|"                      # Weak
+            r"\s*(\d+)\s*\|"                      # No Movement
             r"\s*(.*?)\s*\|"                      # Manual Advance
         )
         for line in table_content.splitlines():
@@ -134,17 +138,19 @@ def parse_session_report(filepath, app_strings_dict):
             if match:
                 step_id_str = match.group(1).strip()
                 step_name_en = match.group(2).strip()
-                time_taken = float(match.group(4))
-                incorrect = int(match.group(5))
-                weak = int(match.group(6))
-                no_movement = int(match.group(7))
-                manual_advance_str = match.group(8).strip()
+                mov_type_en = match.group(4).strip()
+                time_taken = float(match.group(6))
+                incorrect = int(match.group(7))
+                weak = int(match.group(8))
+                no_movement = int(match.group(9))
+                manual_advance_str = match.group(10).strip()
                 lang_for_yes_no = data['report_original_language'] or 'en'
                 manually_advanced = (manual_advance_str.lower() == 
                                     tr('report_value_yes', lang_for_yes_no, app_strings_dict).lower())
                 data['steps'].append({
                     'id': step_id_str if step_id_str != "N/A" else None,
                     'name_en': step_name_en if step_name_en else "Unknown Step",
+                    'movement_type_en': mov_type_en if mov_type_en != "N/A" else "Unknown Type",
                     'time_taken': time_taken,
                     'incorrect': incorrect,
                     'weak': weak,
@@ -252,6 +258,43 @@ def generate_trainings_per_minute_graph(session_datetimes, patient_name, output_
         plt.close(fig)
         return None
 
+# Global caches, keyed by step_id (string) and step_name_en (string) respectively
+ALL_STEPS_DEFINITIONS_CACHE_BY_ID = {}
+ALL_STEPS_DEFINITIONS_CACHE_BY_NAME_EN = {}
+
+def _ensure_all_steps_caches_populated(app_exercise_sequences_def):
+    global ALL_STEPS_DEFINITIONS_CACHE_BY_ID, ALL_STEPS_DEFINITIONS_CACHE_BY_NAME_EN
+    # Populate only if the primary cache (by ID) is empty
+    if not ALL_STEPS_DEFINITIONS_CACHE_BY_ID:
+        temp_cache_by_id = {}
+        temp_cache_by_name_en = {}
+        processed_ids = set()
+
+        for _, sequence_data in app_exercise_sequences_def.items():
+            # sequence_data is a tuple: (trans_key, steps_list)
+            if isinstance(sequence_data, tuple) and len(sequence_data) == 2:
+                _, steps_list = sequence_data
+                if isinstance(steps_list, list):
+                    for step_info in steps_list:
+                        if not isinstance(step_info, dict): continue
+
+                        step_id_str = str(step_info.get('id'))
+                        step_name_en = step_info.get('name_en')
+
+                        if step_id_str and step_id_str not in processed_ids:
+                            temp_cache_by_id[step_id_str] = step_info
+                            processed_ids.add(step_id_str)
+                        
+                        if step_name_en and step_name_en not in temp_cache_by_name_en:
+                            # Only add to name_en cache if name is not already a key 
+                            temp_cache_by_name_en[step_name_en] = step_info
+                            
+        ALL_STEPS_DEFINITIONS_CACHE_BY_ID = temp_cache_by_id
+        ALL_STEPS_DEFINITIONS_CACHE_BY_NAME_EN = temp_cache_by_name_en
+        print(f"CACHE_BY_ID populated with {len(ALL_STEPS_DEFINITIONS_CACHE_BY_ID)} entries.")
+        print(f"CACHE_BY_NAME_EN populated with {len(ALL_STEPS_DEFINITIONS_CACHE_BY_NAME_EN)} entries.")
+
+
 def check_pdf_prerequisites():
     """Checks for Pandoc and a LaTeX engine (xelatex)."""
     pandoc_ok = False
@@ -273,6 +316,8 @@ def check_pdf_prerequisites():
 
 def generate_summary_report_for_patient(patient_name, base_output_path, app_strings_dict, app_exercise_sequences_def, attempt_pdf_generation=False):
     print(f"Generating summary reports for patient: {patient_name}...")
+
+    _ensure_all_steps_caches_populated(app_exercise_sequences_def)
 
     # Main directory for the patient
     patient_main_data_dir = os.path.join(base_output_path, patient_name)
@@ -309,6 +354,16 @@ def generate_summary_report_for_patient(patient_name, base_output_path, app_stri
     all_parsed_sessions.sort(key=lambda s: s['date_time'])
     status_messages = []
 
+    # Movement Type translation map
+    movement_type_translations = {} # Key: English movement type, Value: {'en': ..., 'pt': ...}
+    for step_def in ALL_STEPS_DEFINITIONS_CACHE_BY_ID.values():
+        en_type = step_def.get('movement_type_en')
+        if en_type and en_type not in movement_type_translations:
+            movement_type_translations[en_type] = {
+                'en': en_type,
+                'pt': step_def.get('movement_type_pt', en_type)
+            }
+
     # Loop to generate report in each language ('en','pt')
     for report_lang in app_strings_dict.keys():
         print(f"Generating {report_lang} summary...")
@@ -330,6 +385,11 @@ def generate_summary_report_for_patient(patient_name, base_output_path, app_stri
         session_dates = [s['date_time'] for s in all_parsed_sessions]
         total_steps = total_perfect = total_no_incorrect = 0
         overall_error = defaultdict(lambda: {'errors':0, 'count':0, 'name_en':''})
+
+        performance_by_movement_type = defaultdict(lambda: {
+            'total_time': 0, 'total_steps': 0, 'incorrect': 0, 'weak': 0,
+            'no_movement': 0, 'manual': 0, 'perfect_first_try': 0
+        })
 
         for sess in all_parsed_sessions:
             # identify sequence key by matching any translation
@@ -367,16 +427,43 @@ def generate_summary_report_for_patient(patient_name, base_output_path, app_stri
                 oe['errors'] += errors
                 oe['count'] += 1
                 oe['name_en'] = step['name_en']
+                oe['id'] = step['id']
+
+                # Agregate by Movement Type
+                mov_type_en = step.get('movement_type_en', 'Unknown Type')
+                mt_data = performance_by_movement_type[mov_type_en]
+                mt_data['total_time'] += step['time_taken']
+                mt_data['total_steps'] += 1
+                mt_data['incorrect'] += step['incorrect']
+                mt_data['weak'] += step['weak']
+                mt_data['no_movement'] += step['no_movement']
+                mt_data['manual'] += 1 if step['manually_advanced'] else 0
+                if not step['manually_advanced'] and errors == 0:
+                    mt_data['perfect_first_try'] += 1
+
 
         success_pct = (total_perfect/total_steps*100) if total_steps>0 else 0
         no_error_pct = (total_no_incorrect/total_steps*100) if total_steps>0 else 0
 
         # find most problematic step
-        most_step = tr('report_value_na', report_lang, app_strings_dict)
+        most_problematic_step_display_name = tr('report_value_na', report_lang, app_strings_dict)
         errs = {k:v for k,v in overall_error.items() if v['errors']>0}
         if errs:
-            m = max(errs, key=lambda k: errs[k]['errors'])
-            most_step = errs[m]['name_en']
+            most_problematic_step_key = max(errs, key=lambda k: errs[k]['errors'])
+            most_step_id = errs[most_problematic_step_key].get('id')
+            most_step = errs[most_problematic_step_key]['name_en']
+
+            step_definition = None
+            if most_step_id:
+                step_definition = ALL_STEPS_DEFINITIONS_CACHE_BY_ID.get(most_step_id)
+            if not step_definition:
+                step_definition = ALL_STEPS_DEFINITIONS_CACHE_BY_NAME_EN.get(most_step)
+            
+            if step_definition:
+                most_problematic_step_display_name = step_definition.get(f'name_{report_lang}', most_step)
+            else:
+                most_problematic_step_display_name = most_step
+
             
         # most problematic sequence
         seq_errors = {k: sum(d['incorrect']+d['weak']+d['no_movement']
@@ -410,7 +497,7 @@ def generate_summary_report_for_patient(patient_name, base_output_path, app_stri
              + f"{success_pct:.1f}%",
             f"- **{tr('summary_overall_step_no_incorrect_rate', report_lang, app_strings_dict)}:** "
              + f"{no_error_pct:.1f}%",
-            f"- **{tr('summary_most_problematic_step', report_lang, app_strings_dict)}:** {most_step}",
+            f"- **{tr('summary_most_problematic_step', report_lang, app_strings_dict)}:** {most_problematic_step_display_name}",
             f"- **{tr('summary_most_problematic_sequence', report_lang, app_strings_dict)}:** {most_seq}"
         ]
         if graph_fn_daily:
@@ -423,6 +510,24 @@ def generate_summary_report_for_patient(patient_name, base_output_path, app_stri
         #     md.append(f"\n### {tr('graph_title_sessions_per_minute', report_lang, app_strings_dict, 'Training Sessions per Minute')}")
         #     md.append(f"![{tr('graph_title_sessions_per_minute', report_lang, app_strings_dict, 'Training Sessions per Minute')}]({absolute_graph_path_minutely})")
 
+        # Performance by Movement Type
+        md.append(f"\n## {tr('summary_movement_type_header', report_lang, app_strings_dict, 'Performance by Movement Type')}")
+        if performance_by_movement_type:
+            md.append(f"| {tr('report_table_header_movement_type', report_lang, app_strings_dict, 'Movement Type')} | {tr('summary_avg_time_per_step', report_lang, app_strings_dict)} | {tr('summary_total_incorrect', report_lang, app_strings_dict)} | {tr('summary_total_weak', report_lang, app_strings_dict)} | {tr('summary_total_no_movement', report_lang, app_strings_dict)} | {tr('summary_total_manual_advance', report_lang, app_strings_dict)} | {tr('summary_step_perfection_rate', report_lang, app_strings_dict)} |")
+            md.append( "|---|---|---|---|---|---|---|" )
+            sorted_mov_types = sorted(performance_by_movement_type.keys())
+            for mov_type_en_key in sorted_mov_types:
+                mt_data = performance_by_movement_type[mov_type_en_key]
+                
+                translations_for_current_mov_type = movement_type_translations.get(mov_type_en_key)
+                mov_type_display = translations_for_current_mov_type.get(report_lang, mov_type_en_key)
+
+                avg_time = (mt_data['total_time'] / mt_data['total_steps']) if mt_data['total_steps'] > 0 else 0
+                perfection_rate = (mt_data['perfect_first_try'] / mt_data['total_steps'] * 100) if mt_data['total_steps'] > 0 else 0
+                md.append(f"| {mov_type_display} | {avg_time:.2f} | {mt_data['incorrect']} | {mt_data['weak']} | {mt_data['no_movement']} | {mt_data['manual']} | {perfection_rate:.1f}% |")
+        else:
+            md.append(f"{tr('report_value_na', report_lang, app_strings_dict, 'N/A')}")
+
         md.append(f"\n## {tr('summary_sequence_performance_header', report_lang, app_strings_dict)}")
         for seq_internal_key, data_dict in sessions_per_sequence_type.items():
             trans_key_for_seq_name = app_exercise_sequences_def.get(seq_internal_key, (seq_internal_key,None))[0]
@@ -432,8 +537,8 @@ def generate_summary_report_for_patient(patient_name, base_output_path, app_stri
             mean_duration_this_seq = data_dict['total_duration'] / data_dict['count'] if data_dict['count'] > 0 else 0
             md.append(f"- **{tr('summary_mean_duration_this_sequence', report_lang, app_strings_dict)}:** {str(datetime.timedelta(seconds=int(mean_duration_this_seq)))}")
             md.append(f"\n**{tr('report_step_details_header', report_lang, app_strings_dict)} ({display_seq_name}):**")
-            md.append(f"\n| {tr('report_table_header_name', report_lang, app_strings_dict)} | {tr('summary_avg_time_per_step', report_lang, app_strings_dict)} | {tr('summary_total_incorrect', report_lang, app_strings_dict)} | {tr('summary_total_weak', report_lang, app_strings_dict)} | {tr('summary_total_no_movement', report_lang, app_strings_dict)} | {tr('summary_total_manual_advance', report_lang, app_strings_dict)} | {tr('summary_step_perfection_rate', report_lang, app_strings_dict)} |")
-            md.append( "|---|---|---|---|---|---|---|" )
+            md.append(f"\n| {tr('report_table_header_name', report_lang, app_strings_dict)} | {tr('report_table_header_movement_type', report_lang, app_strings_dict)} | {tr('summary_avg_time_per_step', report_lang, app_strings_dict)} | {tr('summary_total_incorrect', report_lang, app_strings_dict)} | {tr('summary_total_weak', report_lang, app_strings_dict)} | {tr('summary_total_no_movement', report_lang, app_strings_dict)} | {tr('summary_total_manual_advance', report_lang, app_strings_dict)} | {tr('summary_step_perfection_rate', report_lang, app_strings_dict)} |")
+            md.append( "|---|---|---|---|---|---|---|---|" )
             current_seq_step_defs = []
             for ik, (_, steps_list) in app_exercise_sequences_def.items():
                 if ik == seq_internal_key: current_seq_step_defs = steps_list; break
@@ -441,14 +546,15 @@ def generate_summary_report_for_patient(patient_name, base_output_path, app_stri
                 step_id_from_def = str(step_def_info['id']); step_name_en_from_def = step_def_info['name_en']
                 step_key_for_agg = step_id_from_def if step_id_from_def in data_dict['steps_data'] else step_name_en_from_def
                 step_agg_data = data_dict['steps_data'].get(step_key_for_agg)
+                movement_type_for_step = step_def_info.get(f'movement_type_{report_lang}', step_def_info.get('movement_type_en', tr('report_value_na', report_lang, app_strings_dict)))
                 if step_agg_data:
                     step_display_name = step_def_info.get(f'name_{report_lang}', step_name_en_from_def)
                     avg_time = sum(step_agg_data['time']) / len(step_agg_data['time']) if step_agg_data['time'] else 0
                     perfection_rate = (step_agg_data['perfect_first_try'] / step_agg_data['total_completed'] * 100) if step_agg_data['total_completed'] > 0 else 0
-                    md.append(f"| {step_display_name} | {avg_time:.2f} | {step_agg_data['incorrect']} | {step_agg_data['weak']} | {step_agg_data['no_movement']} | {step_agg_data['manual']} | {perfection_rate:.1f}% |")
+                    md.append(f"| {step_display_name} | {movement_type_for_step} | {avg_time:.2f} | {step_agg_data['incorrect']} | {step_agg_data['weak']} | {step_agg_data['no_movement']} | {step_agg_data['manual']} | {perfection_rate:.1f}% |")
                 else:
                     step_display_name = step_def_info.get(f'name_{report_lang}', step_name_en_from_def)
-                    md.append(f"| {step_display_name} | {tr('report_value_na', report_lang, app_strings_dict)} | {tr('report_value_na', report_lang, app_strings_dict)} | {tr('report_value_na', report_lang, app_strings_dict)} | {tr('report_value_na', report_lang, app_strings_dict)} | {tr('report_value_na', report_lang, app_strings_dict)} | {tr('report_value_na', report_lang, app_strings_dict)} |")
+                    md.append(f"| {step_display_name} | {movement_type_for_step} | {tr('report_value_na', report_lang, app_strings_dict)} | {tr('report_value_na', report_lang, app_strings_dict)} | {tr('report_value_na', report_lang, app_strings_dict)} | {tr('report_value_na', report_lang, app_strings_dict)} | {tr('report_value_na', report_lang, app_strings_dict)} | {tr('report_value_na', report_lang, app_strings_dict)} |")
 
 
         out_fn = os.path.join(patient_main_data_dir,
