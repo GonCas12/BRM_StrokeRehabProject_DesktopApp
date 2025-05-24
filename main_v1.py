@@ -148,16 +148,22 @@ def run_application(existing_app=None):
             return result
 
 
+import neurokit2 as nk
+
 # --- Configuration ---
-APP_TITLE = "Stroke Rehabilitation Assistant"
 UPDATE_INTERVAL_MS = 100
+ADVANCE_DELAY_MS = 2000 # Time that it takes to move to next movement after CORRECT_MOVEMENT
+SERIAL_PORT = "COM3" # Serial Port that Connects to Arduino
+BAUD_RATE = 9600 # Correspond to the Baud Rate (taxa transmissão) of Arduino Code
+# --- Don't Change Further Code
+
+APP_TITLE = "Stroke Rehabilitation Assistant"
 LANGUAGES = ['en', 'pt']
 DEFAULT_LANGUAGE = 'en'
-ADVANCE_DELAY_MS = 500
-SERIAL_PORT = "COM3"
-BAUD_RATE = 9600
+
+# EMG Simulation
 SIMULATE_EMG = True
-SIMULATION_DELAY_S = 2
+SIMULATION_DELAY_S = 2 # Time between New Simulated Signal
 POSSIBLE_STATUSES = ['NO_MOVEMENT', 'INCORRECT_MOVEMENT', 'CORRECT_WEAK', 'CORRECT_STRONG']
 STATUS_WEIGHTS = [0.3, 0.2, 0.3, 0.2]
 
@@ -191,12 +197,40 @@ os.makedirs(OUTPUT_PATH, exist_ok=True)
 
 # --- Exercise Steps Definition ---
 EXERCISE_STEPS_TEMPLATE = [
-    {'id': 0, 'name_en': 'Rest', 'name_pt': 'Descansar', 'video': 'rest.mp4'},
-    {'id': 1, 'name_en': 'Reach for Cup', 'name_pt': 'Alcançar Copo', 'video': 'reach_cup.mp4', 'target_muscle': 'Biceps'},
-    {'id': 2, 'name_en': 'Grasp Cup', 'name_pt': 'Agarrar Copo', 'video': 'grasp_cup.mp4', 'target_muscle': 'Pronator'},
-    {'id': 3, 'name_en': 'Lift Cup', 'name_pt': 'Levantar Copo', 'video': 'lift_cup.mp4', 'target_muscle': 'Biceps'},
-    {'id': 4, 'name_en': 'Drink', 'name_pt': 'Beber', 'video': 'drink.mp4', 'target_muscle': 'Biceps'},
-    {'id': 5, 'name_en': 'Lower Cup', 'name_pt': 'Pousar Copo', 'video': 'lower_cup.mp4', 'target_muscle': 'Triceps'},
+    {'id': 0, 'name_en': 'Rest', 'name_pt': 'Descansar', 'video': 'rest.mp4', 'movement_type_en': 'Rest', 'movement_type_pt': 'Repouso'},
+    {'id': 1, 'name_en': 'Reach for Cup', 'name_pt': 'Alcançar Copo', 'video': 'reach_cup.mp4', 'movement_type_en': 'Supination', 'movement_type_pt': 'Supinação'},
+    {'id': 2, 'name_en': 'Grasp Cup', 'name_pt': 'Agarrar Copo', 'video': 'grasp_cup.mp4', 'movement_type_en': 'Grasp', 'movement_type_pt': 'Agarrar'},
+    {'id': 3, 'name_en': 'Lift Cup', 'name_pt': 'Levantar Copo', 'video': 'lift_cup.mp4', 'movement_type_en': 'Flexion', 'movement_type_pt': 'Flexão'},
+    {'id': 4, 'name_en': 'Drink', 'name_pt': 'Beber', 'video': 'drink.mp4', 'movement_type_en': 'Pronation', 'movement_type_pt': 'Pronação'},
+    {'id': 5, 'name_en': 'Lower Cup', 'name_pt': 'Pousar Copo', 'video': 'lower_cup.mp4', 'movement_type_en': 'Extension', 'movement_type_pt': 'Extensão'},
+]
+
+SOUP_STEPS = [
+    EXERCISE_STEPS_TEMPLATE[0], # Rest
+    {'id': 6, 'name_en': 'Reach for Spoon', 'name_pt': 'Alcançar Colher', 'video': 'reach_spoon.mp4', 'movement_type_en': 'Extension', 'movement_type_pt': 'Extensão'},
+    {'id': 7, 'name_en': 'Grasp Spoon', 'name_pt': 'Agarrar Colher', 'video': 'grasp_spoon.mp4', 'movement_type_en': 'Grasp', 'movement_type_pt': 'Agarrar'},
+    {'id': 8, 'name_en': 'Scoop Soup', 'name_pt': 'Apanhar Sopa', 'video': 'scoop_soup.mp4', 'movement_type_en': 'Supination', 'movement_type_pt': 'Supinação'},
+    {'id': 9, 'name_en': 'Bring Spoon to Mouth', 'name_pt': 'Levar Colher à Boca', 'video': 'bring_spoon_mouth.mp4', 'movement_type_en': 'Flexion', 'movement_type_pt': 'Flexão'},
+    {'id': 10, 'name_en': 'Return Spoon to Bowl', 'name_pt': 'Devolver Colher à Tigela', 'video': 'return_spoon_bowl.mp4', 'movement_type_en': 'Extension', 'movement_type_pt': 'Extensão'},
+    {'id': 11, 'name_en': 'Lower Spoon', 'name_pt': 'Pousar Colher', 'video': 'lower_spoon.mp4', 'movement_type_en': 'Pronation', 'movement_type_pt': 'Pronação'},
+]
+
+BOOK_GRAB_STEPS = [
+    EXERCISE_STEPS_TEMPLATE[0], # Rest
+    {'id': 12, 'name_en': 'Reach for Book', 'name_pt': 'Alcançar Livro', 'video': 'reach_book.mp4', 'movement_type_en': 'Extension', 'movement_type_pt': 'Extensão'},
+    {'id': 13, 'name_en': 'Grasp Book', 'name_pt': 'Agarrar Livro', 'video': 'grasp_book.mp4', 'movement_type_en': 'Grasp', 'movement_type_pt': 'Agarrar'},
+    {'id': 14, 'name_en': 'Lift Book', 'name_pt': 'Levantar Livro', 'video': 'lift_book.mp4', 'movement_type_en': 'Flexion', 'movement_type_pt': 'Flexão'},
+    {'id': 15, 'name_en': 'Turn Book', 'name_pt': 'Roda Livro', 'video': 'turn_book_closer.mp4', 'movement_type_en': 'Supination', 'movement_type_pt': 'Supinação'},
+    {'id': 16, 'name_en': 'Lower Book', 'name_pt': 'Pousar Livro', 'video': 'lower_book.mp4', 'movement_type_en': 'Extension', 'movement_type_pt': 'Extensão'},
+]
+
+DOOR_KNOB_STEPS = [
+    EXERCISE_STEPS_TEMPLATE[0], # Rest
+    {'id': 17, 'name_en': 'Reach for Door Knob', 'name_pt': 'Alcançar Maçaneta', 'video': 'reach_knob.mp4', 'movement_type_en': 'Extension', 'movement_type_pt': 'Extensão'},
+    {'id': 18, 'name_en': 'Grasp Door Knob', 'name_pt': 'Agarrar Maçaneta', 'video': 'grasp_knob.mp4', 'movement_type_en': 'Grasp', 'movement_type_pt': 'Agarrar'},
+    {'id': 19, 'name_en': 'Turn Door Knob', 'name_pt': 'Rodar Maçaneta', 'video': 'turn_knob.mp4', 'movement_type_en': 'Supination', 'movement_type_pt': 'Supinação'},
+    {'id': 20, 'name_en': 'Retract Hand', 'name_pt': 'Recuar Mão', 'video': 'retract_hand_knob.mp4', 'movement_type_en': 'Flexion', 'movement_type_pt': 'Flexão'},
+    {'id': 21, 'name_en': 'Release Door Knob', 'name_pt': 'Largar Maçaneta', 'video': 'release_knob.mp4', 'movement_type_en': 'Rest', 'movement_type_pt': 'Repouso'},
 ]
 
 # --- Text Strings (internationalization) ---
@@ -237,7 +271,9 @@ STRINGS = {
         'report_patient_header': "Patient",
         'report_sequence_name': "Exercise Sequence", 'report_total_duration': "Total Duration",
         'report_step_details_header': "Step Details", 'report_table_header_step_num': "Step #",
-        'report_table_header_name': "Name", 'report_table_header_time': "Time Taken (s)",
+        'report_table_header_name': "Name",
+        'report_table_header_movement_type': "Movement Type", 
+        'report_table_header_time': "Time Taken (s)",
         'report_table_header_incorrect': "Incorrect", 'report_table_header_weak': "Weak",
         'report_table_header_no_movement': "No Movement", 'report_table_header_manual_advance': "Manual Advance",
         'report_value_yes': "Yes", 'report_value_no': "No", 'report_value_na': "N/A",
@@ -255,6 +291,9 @@ STRINGS = {
         'sequence_cup_name': "Cup Sequence",
         'sequence_rest_only_name': "Rest Only",
         'sequence_short_name': "Short Sequence",
+        'sequence_soup_name': "Soup Sequence",
+        'sequence_grab_book_name': "Book Grab Sequence",
+        'sequence_turn_door_knob_name': "Open Door Sequence",
         # Summary Report
         'button_create_summary': "Create Summary",
         'summary_report_title': "Patient Summary Report",
@@ -267,6 +306,7 @@ STRINGS = {
         'summary_overall_step_no_incorrect_rate': "Overall Step Completion Rate (No Incorrect Attempts)",
         'summary_most_problematic_step': "Most Problematic Step (by total errors)",
         'summary_most_problematic_sequence': "Most Problematic Sequence (by total errors)",
+        'summary_movement_type_header': "Performance by Movement Type",
         'summary_sequence_performance_header': "Performance by Exercise Sequence",
         'summary_times_performed': "Times Performed",
         'graph_xlabel_date': "Date",
@@ -312,7 +352,9 @@ STRINGS = {
         'report_patient_header': "Paciente",
         'report_sequence_name': "Sequência de Exercício", 'report_total_duration': "Duração Total",
         'report_step_details_header': "Detalhes dos Passos", 'report_table_header_step_num': "Passo N.º",
-        'report_table_header_name': "Nome", 'report_table_header_time': "Tempo Gasto (s)",
+        'report_table_header_name': "Nome",
+        'report_table_header_movement_type': "Tipo de Movimento",
+        'report_table_header_time': "Tempo Gasto (s)",
         'report_table_header_incorrect': "Incorretas", 'report_table_header_weak': "Fracas",
         'report_table_header_no_movement': "Sem Movimento", 'report_table_header_manual_advance': "Avanço Manual",
         'report_value_yes': "Sim", 'report_value_no': "Não", 'report_value_na': "N/D",
@@ -330,6 +372,9 @@ STRINGS = {
         'sequence_cup_name': "Sequência do Copo",
         'sequence_rest_only_name': "Apenas Descanso",
         'sequence_short_name': "Sequência Curta",
+        'sequence_soup_name': "Sequência da Sopa",
+        'sequence_grab_book_name': "Sequência Alcançar Livro",
+        'sequence_turn_door_knob_name': "Sequência Abrir Porta",
         # Summary Report
         'button_create_summary': "Criar Resumo",
         'summary_report_title': "Relatório Resumo do Paciente",
@@ -342,6 +387,7 @@ STRINGS = {
         'summary_overall_step_no_incorrect_rate': "Taxa de Conclusão de Passo (Sem Tentativas Incorretas)",
         'summary_most_problematic_step': "Passo Mais Problemático (por total de erros)",
         'summary_most_problematic_sequence': "Sequência Mais problemática (por total de erros)",
+        'summary_movement_type_header': "Desempenho por Tipo de Movimento",
         'summary_sequence_performance_header': "Desempenho por Sequência de Exercício",
         'summary_times_performed': "Vezes Realizado",
         'graph_xlabel_date': "Data",
@@ -670,18 +716,20 @@ class EMGProcessingWorker(QObject):
                 time.sleep(SIMULATION_DELAY_S)
                 status = random.choices(POSSIBLE_STATUSES, weights=STATUS_WEIGHTS, k=1)[0]
                 intensity = 0.0
-                if status == 'CORRECT_WEAK':
+                if status == POSSIBLE_STATUSES[2]: #CORRECT_WEAK 
                     intensity = random.uniform(0.2, 0.5)
-                elif status == 'CORRECT_STRONG':
+                    plot_data = nk.emg_simulate(duration=2, sampling_rate=1000, burst_number=1)/10
+
+                elif status == POSSIBLE_STATUSES[3]: #CORRECT_STRONG
                     intensity = random.uniform(0.55, 1.0)
-                plot_data = [random.gauss(0, 0.1) + (intensity * 0.5 if status.startswith('CORRECT') else 0) 
-                            for _ in range(100)]
-                result = {
-                    'status': status,
-                    'intensity': intensity,
-                    'plot_data': plot_data,
-                    'timestamp': time.time()
-                }
+                    plot_data = nk.emg_simulate(duration=2, sampling_rate=1000, burst_number=1)
+
+                elif status == POSSIBLE_STATUSES[1]: # INCORRECT_MOVEMENT
+                    plot_data = [random.gauss(0, 0.1) + (intensity * 0.5) for _ in range(100)]
+                
+                elif status == POSSIBLE_STATUSES[0]: #NO_MOVEMENT
+                    plot_data = []
+                result = {'status': status, 'intensity': intensity, 'plot_data': plot_data, 'timestamp': time.time()}
                 self.new_result.emit(result)
             
             # Small delay to prevent CPU hammering
@@ -874,6 +922,39 @@ class SelectionDialog(QDialog): # MODIFIED
         print(f"SelectionDialog language changed to: {self.dialog_language}")
         self._update_dialog_texts()
 
+# --- Worker Thread ---
+class PDFGenerationWorker(QObject):
+    # Signal to indicate completion, carrying the status message
+    finished = Signal(str)
+    error = Signal(str)
+
+    def __init__(self, patient_name, base_output_path, app_strings_dict, app_exercise_sequences_def, attempt_pdf):
+        super().__init__()
+        self.patient_name = patient_name
+        self.base_output_path = base_output_path
+        self.app_strings_dict = app_strings_dict
+        self.app_exercise_sequences_def = app_exercise_sequences_def
+        self.attempt_pdf = attempt_pdf
+
+    @Slot()
+    def process_report_generation(self):
+        """This slot will run in the separate thread."""
+        try:
+            print("PDFGenerationWorker: Starting summary report generation...")
+            status_message = generate_summary_report_for_patient(
+                patient_name=self.patient_name,
+                base_output_path=self.base_output_path,
+                app_strings_dict=self.app_strings_dict,
+                app_exercise_sequences_def=self.app_exercise_sequences_def,
+                attempt_pdf_generation=self.attempt_pdf
+            )
+            self.finished.emit(status_message)
+            print("PDFGenerationWorker: Finished summary report generation.")
+        except Exception as e:
+            error_msg = f"Error during PDF generation: {e}"
+            print(f"PDFGenerationWorker: {error_msg}")
+            self.error.emit(error_msg)
+
 # --- Main Application Window ---
 class MainWindow(QMainWindow): # Keep as is
     def __init__(self, patient_name, selected_sequence_name, selected_steps):
@@ -905,6 +986,9 @@ class MainWindow(QMainWindow): # Keep as is
         # Create EMG control widgets
         self.setup_emg_controls()
         self.processing_thread.start(); self.advance_step()
+        self.pdf_thread = None
+        self.pdf_worker = None
+
 
     def _start_new_session_tracking(self): # Keep as is
         self.session_start_time = datetime.datetime.now(); self.session_report_data = []
@@ -1291,6 +1375,8 @@ class MainWindow(QMainWindow): # Keep as is
             step_data = {
                 'step_id': completed_step_info['id'],
                 'step_name_en': completed_step_info['name_en'], 'step_name_pt': completed_step_info['name_pt'],
+                'movement_type_en': completed_step_info.get('movement_type_en', 'N/A'),
+                'movement_type_pt': completed_step_info.get('movement_type_pt', 'N/A'),
                 'time_taken_seconds': round(time_taken_for_step, 2),
                 'incorrect_attempts': self.current_step_attempts.get('INCORRECT_MOVEMENT', 0),
                 'weak_attempts': self.current_step_attempts.get('CORRECT_WEAK', 0),
@@ -1316,6 +1402,8 @@ class MainWindow(QMainWindow): # Keep as is
             step_data = {
                 'step_id': current_step_info['id'],
                 'step_name_en': current_step_info['name_en'], 'step_name_pt': current_step_info['name_pt'],
+                'movement_type_en': current_step_info.get('movement_type_en', 'N/A'),
+                'movement_type_pt': current_step_info.get('movement_type_pt', 'N/A'),
                 'time_taken_seconds': round(time_taken_for_step, 2),
                 'incorrect_attempts': self.current_step_attempts.get('INCORRECT_MOVEMENT', 0),
                 'weak_attempts': self.current_step_attempts.get('CORRECT_WEAK', 0),
@@ -1434,8 +1522,8 @@ class MainWindow(QMainWindow): # Keep as is
         md_content.append(f"**{self.tr('report_total_duration')}:** {total_duration_str}")
         md_content.append(f"\n## {self.tr('report_step_details_header')}")
 
-        md_content.append(f"| {self.tr('report_table_header_step_num')} | Step ID | Step Name (EN) | {self.tr('report_table_header_name')} | {self.tr('report_table_header_time')} | {self.tr('report_table_header_incorrect')} | {self.tr('report_table_header_weak')} | {self.tr('report_table_header_no_movement')} | {self.tr('report_table_header_manual_advance')} |")
-        md_content.append("|---|---|---|---|---|---|---|---|---|")
+        md_content.append(f"| {self.tr('report_table_header_step_num')} | Step ID | Step Name (EN) | {self.tr('report_table_header_name')} |  Movement Type (EN) | {self.tr('report_table_header_movement_type')} | {self.tr('report_table_header_time')} | {self.tr('report_table_header_incorrect')} | {self.tr('report_table_header_weak')} | {self.tr('report_table_header_no_movement')} | {self.tr('report_table_header_manual_advance')} |")
+        md_content.append("|---|---|---|---|---|---|---|---|---|---|---|")
 
         for i, step_data in enumerate(self.session_report_data):
             # Explicitly get the translated name based on self.current_language
@@ -1446,9 +1534,11 @@ class MainWindow(QMainWindow): # Keep as is
             
             step_id = step_data.get('step_id', 'N/A')
             step_name_en = step_data.get('step_name_en', 'N/A') # Canonical English name
+            movement_type_en_val = step_data.get('movement_type_en', 'N/A')
+            movement_type_lang_val = step_data.get(f'movement_type_{self.current_language}', movement_type_en_val)
             manually_advanced_str = self.tr('report_value_yes') if step_data.get('manually_advanced', False) else self.tr('report_value_no')
             
-            md_content.append(f"| {i+1} | {step_id} | {step_name_en} | {step_name_for_report_column} | {step_data['time_taken_seconds']:.2f} | "
+            md_content.append(f"| {i+1} | {step_id} | {step_name_en} | {step_name_for_report_column} | {movement_type_en_val} | {movement_type_lang_val} | {step_data['time_taken_seconds']:.2f} | "
                               f"{step_data['incorrect_attempts']} | {step_data['weak_attempts']} | "
                               f"{step_data['no_movement_attempts']} | {manually_advanced_str} |")
         try:
@@ -1469,7 +1559,7 @@ class MainWindow(QMainWindow): # Keep as is
 
     @Slot()
     def _create_summary_report(self):
-        """Generates a summary report for the current patient."""
+        """Handles the 'Create Summary' button click to generate reports in a separate thread."""
         print(f"Create Summary button clicked for patient: {self.patient_name}")
             # Ask user if they want to attempt PDF generation
         reply = QMessageBox.question(self, self.tr('summary_report_title'), # Dialog Title
@@ -1479,21 +1569,32 @@ class MainWindow(QMainWindow): # Keep as is
 
         attempt_pdf = (reply == QMessageBox.StandardButton.Yes)
 
-        if attempt_pdf:
-            print("User chose to attempt PDF generation.")
-        else:
-            print("User chose to skip PDF generation.")
+        self.create_summary_button.setEnabled(False)
+        self.statusBar().showMessage("Generating summary report, please wait...")
 
-        # Call the function from report_generator.py
-        # Pass the EXERCISE_SEQUENCES definition for mapping translated names
-        status_message = generate_summary_report_for_patient(
+        self.pdf_thread = QThread(self)
+        self.pdf_worker = PDFGenerationWorker(
             patient_name=self.patient_name,
             base_output_path=OUTPUT_PATH,
-            app_strings_dict=STRINGS, # Pass the whole STRINGS dict
-            app_exercise_sequences_def=EXERCISE_SEQUENCES, # Pass sequence definitions
-            attempt_pdf_generation=attempt_pdf # Pass the user's choice
+            app_strings_dict=STRINGS,
+            app_exercise_sequences_def=EXERCISE_SEQUENCES,
+            attempt_pdf=attempt_pdf
         )
+        self.pdf_worker.moveToThread(self.pdf_thread)
 
+        self.pdf_thread.started.connect(self.pdf_worker.process_report_generation)
+        self.pdf_worker.finished.connect(self.on_pdf_generation_finished)
+        self.pdf_worker.error.connect(self.on_pdf_generation_error)
+
+        self.pdf_thread.finished.connect(self.pdf_thread.deleteLater)
+        self.pdf_worker.finished.connect(self.pdf_worker.deleteLater)
+
+        self.pdf_thread.start()
+
+    @Slot(str)
+    def on_pdf_generation_finished(self, status_message):
+        """Called when PDF generation worker is done successfully."""
+        print("MainWindow: PDF generation finished signal received.")
         QMessageBox.information(self, self.tr('summary_report_title'), status_message)
 
 # --- Main Execution Block ---
