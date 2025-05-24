@@ -524,6 +524,39 @@ class SelectionDialog(QDialog): # MODIFIED
         print(f"SelectionDialog language changed to: {self.dialog_language}")
         self._update_dialog_texts()
 
+# --- Worker Thread ---
+class PDFGenerationWorker(QObject):
+    # Signal to indicate completion, carrying the status message
+    finished = Signal(str)
+    error = Signal(str)
+
+    def __init__(self, patient_name, base_output_path, app_strings_dict, app_exercise_sequences_def, attempt_pdf):
+        super().__init__()
+        self.patient_name = patient_name
+        self.base_output_path = base_output_path
+        self.app_strings_dict = app_strings_dict
+        self.app_exercise_sequences_def = app_exercise_sequences_def
+        self.attempt_pdf = attempt_pdf
+
+    @Slot()
+    def process_report_generation(self):
+        """This slot will run in the separate thread."""
+        try:
+            print("PDFGenerationWorker: Starting summary report generation...")
+            status_message = generate_summary_report_for_patient(
+                patient_name=self.patient_name,
+                base_output_path=self.base_output_path,
+                app_strings_dict=self.app_strings_dict,
+                app_exercise_sequences_def=self.app_exercise_sequences_def,
+                attempt_pdf_generation=self.attempt_pdf
+            )
+            self.finished.emit(status_message)
+            print("PDFGenerationWorker: Finished summary report generation.")
+        except Exception as e:
+            error_msg = f"Error during PDF generation: {e}"
+            print(f"PDFGenerationWorker: {error_msg}")
+            self.error.emit(error_msg)
+
 # --- Main Application Window ---
 class MainWindow(QMainWindow): # Keep as is
     def __init__(self, patient_name, selected_sequence_name, selected_steps):
@@ -550,6 +583,9 @@ class MainWindow(QMainWindow): # Keep as is
         self.media_player.mediaStatusChanged.connect(self.handle_media_status_changed)
         self.setup_arduino()
         self.processing_thread.start(); self.advance_step()
+        self.pdf_thread = None
+        self.pdf_worker = None
+
 
     def _start_new_session_tracking(self): # Keep as is
         self.session_start_time = datetime.datetime.now(); self.session_report_data = []
@@ -997,7 +1033,7 @@ class MainWindow(QMainWindow): # Keep as is
 
     @Slot()
     def _create_summary_report(self):
-        """Generates a summary report for the current patient."""
+        """Handles the 'Create Summary' button click to generate reports in a separate thread."""
         print(f"Create Summary button clicked for patient: {self.patient_name}")
             # Ask user if they want to attempt PDF generation
         reply = QMessageBox.question(self, self.tr('summary_report_title'), # Dialog Title
@@ -1007,22 +1043,52 @@ class MainWindow(QMainWindow): # Keep as is
 
         attempt_pdf = (reply == QMessageBox.StandardButton.Yes)
 
-        if attempt_pdf:
-            print("User chose to attempt PDF generation.")
-        else:
-            print("User chose to skip PDF generation.")
+        self.create_summary_button.setEnabled(False)
+        self.statusBar().showMessage("Generating summary report, please wait...")
 
-        # Call the function from report_generator.py
-        # Pass the EXERCISE_SEQUENCES definition for mapping translated names
-        status_message = generate_summary_report_for_patient(
+        self.pdf_thread = QThread(self)
+        self.pdf_worker = PDFGenerationWorker(
             patient_name=self.patient_name,
             base_output_path=OUTPUT_PATH,
-            app_strings_dict=STRINGS, # Pass the whole STRINGS dict
-            app_exercise_sequences_def=EXERCISE_SEQUENCES, # Pass sequence definitions
-            attempt_pdf_generation=attempt_pdf # Pass the user's choice
+            app_strings_dict=STRINGS,
+            app_exercise_sequences_def=EXERCISE_SEQUENCES,
+            attempt_pdf=attempt_pdf
         )
+        self.pdf_worker.moveToThread(self.pdf_thread)
 
+        self.pdf_thread.started.connect(self.pdf_worker.process_report_generation)
+        self.pdf_worker.finished.connect(self.on_pdf_generation_finished)
+        self.pdf_worker.error.connect(self.on_pdf_generation_error)
+
+        self.pdf_thread.finished.connect(self.pdf_thread.deleteLater)
+        self.pdf_worker.finished.connect(self.pdf_worker.deleteLater)
+
+        self.pdf_thread.start()
+
+    @Slot(str)
+    def on_pdf_generation_finished(self, status_message):
+        """Called when PDF generation worker is done successfully."""
+        print("MainWindow: PDF generation finished signal received.")
         QMessageBox.information(self, self.tr('summary_report_title'), status_message)
+        self.create_summary_button.setEnabled(True)
+        self.statusBar().clearMessage()
+        if self.pdf_thread and self.pdf_thread.isRunning():
+            self.pdf_thread.quit()
+            self.pdf_thread.wait()
+        print("MainWindow: PDF generation UI updated.")
+
+    @Slot(str)
+    def on_pdf_generation_error(self, error_message):
+        """Called if an error occurs in the PDF generation worker."""
+        print(f"MainWindow: PDF generation error signal received: {error_message}")
+        QMessageBox.critical(self, "Report Generation Error", error_message)
+        self.create_summary_button.setEnabled(True)
+        self.statusBar().clearMessage()
+        if self.pdf_thread and self.pdf_thread.isRunning():
+            self.pdf_thread.quit()
+            self.pdf_thread.wait()
+        print("MainWindow: PDF generation error UI updated.")
+
 
 # --- Main Execution Block ---
 if __name__ == '__main__':
