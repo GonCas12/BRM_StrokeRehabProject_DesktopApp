@@ -90,7 +90,7 @@ os.makedirs(OUTPUT_PATH, exist_ok=True)
 # --- Exercise Steps Definition ---
 EXERCISE_STEPS_TEMPLATE = [
     {'id': 0, 'name_en': 'Rest', 'name_pt': 'Descansar', 'video': 'rest.mp4', 'movement_type_en': 'Rest', 'movement_type_pt': 'Repouso'},
-    {'id': 1, 'name_en': 'Reach for Cup', 'name_pt': 'Alcançar Copo', 'video': 'reach_cup.mp4', 'movement_type_en': 'Pronation', 'movement_type_pt': 'Pronação'},
+    {'id': 1, 'name_en': 'Reach for Cup', 'name_pt': 'Alcançar Copo', 'video': 'reach_cup.mp4', 'movement_type_en': 'Supination', 'movement_type_pt': 'Supinação'},
     {'id': 2, 'name_en': 'Grasp Cup', 'name_pt': 'Agarrar Copo', 'video': 'grasp_cup.mp4', 'movement_type_en': 'Grasp', 'movement_type_pt': 'Agarrar'},
     {'id': 3, 'name_en': 'Lift Cup', 'name_pt': 'Levantar Copo', 'video': 'lift_cup.mp4', 'movement_type_en': 'Flexion', 'movement_type_pt': 'Flexão'},
     {'id': 4, 'name_en': 'Drink', 'name_pt': 'Beber', 'video': 'drink.mp4', 'movement_type_en': 'Pronation', 'movement_type_pt': 'Pronação'},
@@ -99,30 +99,30 @@ EXERCISE_STEPS_TEMPLATE = [
 
 SOUP_STEPS = [
     EXERCISE_STEPS_TEMPLATE[0], # Rest
-    {'id': 6, 'name_en': 'Reach for Spoon', 'name_pt': 'Alcançar Colher', 'video': 'reach_spoon.mp4', 'movement_type_en': 'Rest', 'movement_type_pt': 'Repouso'},
-    {'id': 7, 'name_en': 'Grasp Spoon', 'name_pt': 'Agarrar Colher', 'video': 'grasp_spoon.mp4', 'movement_type_en': 'Rest', 'movement_type_pt': 'Repouso'},
-    {'id': 8, 'name_en': 'Scoop Soup', 'name_pt': 'Apanhar Sopa', 'video': 'scoop_soup.mp4', 'movement_type_en': 'Rest', 'movement_type_pt': 'Repouso'},
-    {'id': 9, 'name_en': 'Bring Spoon to Mouth', 'name_pt': 'Levar Colher à Boca', 'video': 'bring_spoon_mouth.mp4', 'movement_type_en': 'Rest', 'movement_type_pt': 'Repouso'},
-    {'id': 10, 'name_en': 'Return Spoon to Bowl', 'name_pt': 'Devolver Colher à Tigela', 'video': 'return_spoon_bowl.mp4', 'movement_type_en': 'Rest', 'movement_type_pt': 'Repouso'},
-    {'id': 11, 'name_en': 'Lower Spoon', 'name_pt': 'Pousar Colher', 'video': 'lower_spoon.mp4', 'movement_type_en': 'Rest', 'movement_type_pt': 'Repouso'},
+    {'id': 6, 'name_en': 'Reach for Spoon', 'name_pt': 'Alcançar Colher', 'video': 'reach_spoon.mp4', 'movement_type_en': 'Extension', 'movement_type_pt': 'Extensão'},
+    {'id': 7, 'name_en': 'Grasp Spoon', 'name_pt': 'Agarrar Colher', 'video': 'grasp_spoon.mp4', 'movement_type_en': 'Grasp', 'movement_type_pt': 'Agarrar'},
+    {'id': 8, 'name_en': 'Scoop Soup', 'name_pt': 'Apanhar Sopa', 'video': 'scoop_soup.mp4', 'movement_type_en': 'Supination', 'movement_type_pt': 'Supinação'},
+    {'id': 9, 'name_en': 'Bring Spoon to Mouth', 'name_pt': 'Levar Colher à Boca', 'video': 'bring_spoon_mouth.mp4', 'movement_type_en': 'Flexion', 'movement_type_pt': 'Flexão'},
+    {'id': 10, 'name_en': 'Return Spoon to Bowl', 'name_pt': 'Devolver Colher à Tigela', 'video': 'return_spoon_bowl.mp4', 'movement_type_en': 'Extension', 'movement_type_pt': 'Extensão'},
+    {'id': 11, 'name_en': 'Lower Spoon', 'name_pt': 'Pousar Colher', 'video': 'lower_spoon.mp4', 'movement_type_en': 'Pronation', 'movement_type_pt': 'Pronação'},
 ]
 
 BOOK_GRAB_STEPS = [
     EXERCISE_STEPS_TEMPLATE[0], # Rest
-    {'id': 12, 'name_en': 'Reach for Book', 'name_pt': 'Alcançar Livro', 'video': 'reach_book.mp4', 'movement_type_en': 'Rest', 'movement_type_pt': 'Repouso'},
-    {'id': 13, 'name_en': 'Grasp Book', 'name_pt': 'Agarrar Livro', 'video': 'grasp_book.mp4', 'movement_type_en': 'Rest', 'movement_type_pt': 'Repouso'},
-    {'id': 14, 'name_en': 'Lift Book', 'name_pt': 'Levantar Livro', 'video': 'lift_book.mp4', 'movement_type_en': 'Rest', 'movement_type_pt': 'Repouso'},
-    {'id': 15, 'name_en': 'Bring Book Closer', 'name_pt': 'Aproximar Livro', 'video': 'bring_book_closer.mp4', 'movement_type_en': 'Rest', 'movement_type_pt': 'Repouso'},
-    {'id': 16, 'name_en': 'Lower Book', 'name_pt': 'Pousar Livro', 'video': 'lower_book.mp4', 'movement_type_en': 'Rest', 'movement_type_pt': 'Repouso'},
+    {'id': 12, 'name_en': 'Reach for Book', 'name_pt': 'Alcançar Livro', 'video': 'reach_book.mp4', 'movement_type_en': 'Extension', 'movement_type_pt': 'Extensão'},
+    {'id': 13, 'name_en': 'Grasp Book', 'name_pt': 'Agarrar Livro', 'video': 'grasp_book.mp4', 'movement_type_en': 'Grasp', 'movement_type_pt': 'Agarrar'},
+    {'id': 14, 'name_en': 'Lift Book', 'name_pt': 'Levantar Livro', 'video': 'lift_book.mp4', 'movement_type_en': 'Flexion', 'movement_type_pt': 'Flexão'},
+    {'id': 15, 'name_en': 'Turn Book', 'name_pt': 'Roda Livro', 'video': 'turn_book_closer.mp4', 'movement_type_en': 'Supination', 'movement_type_pt': 'Supinação'},
+    {'id': 16, 'name_en': 'Lower Book', 'name_pt': 'Pousar Livro', 'video': 'lower_book.mp4', 'movement_type_en': 'Extension', 'movement_type_pt': 'Extensão'},
 ]
 
 DOOR_KNOB_STEPS = [
     EXERCISE_STEPS_TEMPLATE[0], # Rest
-    {'id': 17, 'name_en': 'Reach for Door Knob', 'name_pt': 'Alcançar Maçaneta', 'video': 'reach_knob.mp4', 'movement_type_en': 'Rest', 'movement_type_pt': 'Repouso'},
-    {'id': 18, 'name_en': 'Grasp Door Knob', 'name_pt': 'Agarrar Maçaneta', 'video': 'grasp_knob.mp4', 'movement_type_en': 'Rest', 'movement_type_pt': 'Repouso'},
-    {'id': 19, 'name_en': 'Turn Door Knob', 'name_pt': 'Rodar Maçaneta', 'video': 'turn_knob.mp4', 'movement_type_en': 'Rest', 'movement_type_pt': 'Repouso'},
-    {'id': 20, 'name_en': 'Release Door Knob', 'name_pt': 'Largar Maçaneta', 'video': 'release_knob.mp4', 'movement_type_en': 'Rest', 'movement_type_pt': 'Repouso'},
-    {'id': 21, 'name_en': 'Retract Hand', 'name_pt': 'Recuar Mão', 'video': 'retract_hand_knob.mp4', 'movement_type_en': 'Rest', 'movement_type_pt': 'Repouso'},
+    {'id': 17, 'name_en': 'Reach for Door Knob', 'name_pt': 'Alcançar Maçaneta', 'video': 'reach_knob.mp4', 'movement_type_en': 'Extension', 'movement_type_pt': 'Extensão'},
+    {'id': 18, 'name_en': 'Grasp Door Knob', 'name_pt': 'Agarrar Maçaneta', 'video': 'grasp_knob.mp4', 'movement_type_en': 'Grasp', 'movement_type_pt': 'Agarrar'},
+    {'id': 19, 'name_en': 'Turn Door Knob', 'name_pt': 'Rodar Maçaneta', 'video': 'turn_knob.mp4', 'movement_type_en': 'Supination', 'movement_type_pt': 'Supinação'},
+    {'id': 20, 'name_en': 'Retract Hand', 'name_pt': 'Recuar Mão', 'video': 'retract_hand_knob.mp4', 'movement_type_en': 'Flexion', 'movement_type_pt': 'Flexão'},
+    {'id': 21, 'name_en': 'Release Door Knob', 'name_pt': 'Largar Maçaneta', 'video': 'release_knob.mp4', 'movement_type_en': 'Rest', 'movement_type_pt': 'Repouso'},
 ]
 
 # --- Text Strings (internationalization) ---
