@@ -391,6 +391,74 @@ EXERCISE_SEQUENCES = {
     ])
 }
 
+class MovementTracker:
+    """Tracks completed movements for exercise sequences"""
+    def __init__(self, confidence_threshold=0.6, min_duration_s=0.3):
+        self.confidence_threshold = confidence_threshold
+        self.min_duration_s = min_duration_s
+        
+        self.current_movement = "Rest"
+        self.movement_start_time = None
+        self.completed_movements = []
+        self.movement_in_progress = False
+        
+    def update(self, movement, confidence, timestamp):
+        """Update movement state and detect completed movements"""
+        completed_movement = None
+        
+        # Check for state changes
+        if movement != self.current_movement:
+            # Transitioning to a new movement
+            if movement != "Rest" and confidence >= self.confidence_threshold:
+                # Starting a movement
+                if not self.movement_in_progress:
+                    print(f"[{timestamp:.2f}] Starting movement: {movement} ({confidence:.2f})")
+                    self.movement_start_time = timestamp
+                    self.movement_in_progress = True
+                else:
+                    # Changing movement type mid-movement
+                    print(f"[{timestamp:.2f}] Movement changed: {self.current_movement} → {movement}")
+                    
+                    # Complete the previous movement if it was long enough
+                    if self.movement_start_time is not None:
+                        duration = timestamp - self.movement_start_time
+                        if duration >= self.min_duration_s:
+                            completed_movement = {
+                                'type': self.current_movement,
+                                'start_time': self.movement_start_time,
+                                'end_time': timestamp,
+                                'duration': duration,
+                                'confidence': confidence
+                            }
+                            self.completed_movements.append(completed_movement)
+                            print(f"[{timestamp:.2f}] Completed {self.current_movement} ({duration:.2f}s)")
+                    
+                    # Start tracking the new movement
+                    self.movement_start_time = timestamp
+            
+            elif movement == "Rest" and self.movement_in_progress:
+                # Completing a movement
+                if self.movement_start_time is not None:
+                    duration = timestamp - self.movement_start_time
+                    if duration >= self.min_duration_s:
+                        completed_movement = {
+                            'type': self.current_movement,
+                            'start_time': self.movement_start_time,
+                            'end_time': timestamp,
+                            'duration': duration,
+                            'confidence': confidence
+                        }
+                        self.completed_movements.append(completed_movement)
+                        print(f"[{timestamp:.2f}] Completed {self.current_movement} ({duration:.2f}s)")
+                
+                self.movement_in_progress = False
+                self.movement_start_time = None
+        
+        # Update current movement
+        self.current_movement = movement
+        
+        return completed_movement
+
 # --- Worker Thread ---
 class EMGZmqReceiver:
     def __init__(self, port=5555):

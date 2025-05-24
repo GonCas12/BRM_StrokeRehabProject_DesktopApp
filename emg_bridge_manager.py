@@ -18,8 +18,8 @@ class EMGBridgeManager(QObject):
         self.process_output_thread = None
         self.terminate_flag = False
     
-    def start_bridge(self, simulate=True, movement_file=None):
-        """Start the DAQ-to-ZMQ bridge process"""
+    def start_bridge(self, simulate=True, test_file=None):
+        """Start the DAQ-to-ZMQ bridge process with optional test file"""
         if self.is_running:
             self.status_changed.emit("Already running")
             return True
@@ -40,11 +40,15 @@ class EMGBridgeManager(QObject):
             time.sleep(1)
             
             # Now start the bridge
-            cmd = ['python', 'run_mock_daq_test.py', '--mock']
+            cmd = ['python', 'run_mock_daq_test.py']
             
-            # Add pre-recorded file if provided
-            if movement_file:
-                cmd.extend(['--file', movement_file])
+            # Add mock flag if simulating
+            if simulate:
+                cmd.append('--mock')
+                
+            # Add test file if provided
+            if test_file:
+                cmd.extend(['--file', test_file])
             
             # Start the process
             print(f"Starting bridge with command: {' '.join(cmd)}")

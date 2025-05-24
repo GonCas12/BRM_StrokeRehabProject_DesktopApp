@@ -19,7 +19,6 @@ import matplotlib
 matplotlib.use('Agg') # Non-interactive backend for saving plots to files
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
-import pypandoc # Convert md to pdf
 import shutil # To check for executables like xelatex
 
 # Helper function to translate using the main app's STRINGS and current language
@@ -467,6 +466,8 @@ def generate_summary_report_for_patient(patient_name, base_output_path, app_stri
     return "\n".join(status_messages) if status_messages else "Summary generation complete."
 
 def md_to_pdf_pypandoc(md_path, pdf_path):
+    import pypandoc # Convert md to pdf
+
     if not check_pdf_prerequisites():
         return False, "PDF generation skipped: Pandoc or LaTeX engine missing."
 
