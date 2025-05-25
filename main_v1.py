@@ -432,29 +432,13 @@ SOUND_MAP = {
 
 # --- Exercise Sequences Definition ---
 EXERCISE_SEQUENCES = {
-    "cup_movement": ("exercise_cup_movement", [
-        {
-            "id": "cup_rest",
-            "name_en": "Rest position",
-            "name_pt": "Posição de descanso",
-            "video": "rest.mp4",
-            "expected_movement": "Rest"  # Expected movement type
-        },
-        {
-            "id": "cup_grab",
-            "name_en": "Grab the cup",
-            "name_pt": "Agarre o copo",
-            "video": "grasp_cup.mp4",
-            "expected_movement": "Flexion"  # Expected movement type
-        },
-        {
-            "id": "cup_release",
-            "name_en": "Release the cup",
-            "name_pt": "Solte o copo",
-            "video": "reach_cup.mp4",
-            "expected_movement": "Extension"  # Expected movement type
-        }
-    ])
+    # Internal Key : (Translatable String Key for Name, Steps List)
+    'Rest Only': ('sequence_rest_only_name', [EXERCISE_STEPS_TEMPLATE[0]]),
+    'Cup Sequence': ('sequence_cup_name', EXERCISE_STEPS_TEMPLATE),
+    # 'Short Sequence': ('sequence_short_name', EXERCISE_STEPS_TEMPLATE[:3]),
+    'Soup Sequence': ('sequence_soup_name', SOUP_STEPS),
+    'Book Grab Sequence': ('sequence_grab_book_name', BOOK_GRAB_STEPS),
+    'Turn Door Knob Sequence': ('sequence_turn_door_knob_name', DOOR_KNOB_STEPS) 
 }
 
 class MovementTracker:
@@ -1454,11 +1438,12 @@ class MainWindow(QMainWindow): # Keep as is
             if self.last_successful_status_time == 0:
                 self.last_successful_status_time = timestamp
                 print(f"Movement completed: {completed_movement['type']} ({completed_movement['duration']:.2f}s)")
-                self.feedback_label.setText(self.tr('feedback_next_step'))
-                self.play_sound('NEXT_STEP')
-                QTimer.singleShot(ADVANCE_DELAY_MS, lambda: self.advance_step(intensity=intensity))
+                def show_next_step_feedback_and_schedule_advance():
+                    self.feedback_label.setText(self.tr('feedback_next_step'))
+                    self.play_sound('NEXT_STEP')
+                    QTimer.singleShot(ADVANCE_DELAY_MS, lambda: self.advance_step(intensity=intensity))
 
-                    QTimer.singleShot(SHORT_DELAY_FOR_STRONG_FEEDBACK_MS, show_next_step_feedback_and_schedule_advance)
+                QTimer.singleShot(SHORT_DELAY_FOR_STRONG_FEEDBACK_MS, show_next_step_feedback_and_schedule_advance)
 
     @Slot()
     def advance_step(self, intensity=0.0):
