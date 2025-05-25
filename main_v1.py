@@ -151,7 +151,8 @@ def run_application(existing_app=None):
 
 # --- Configuration ---
 UPDATE_INTERVAL_MS = 100
-ADVANCE_DELAY_MS = 2000 # Time that it takes to move to next movement after CORRECT_MOVEMENT
+ADVANCE_DELAY_MS = 1000 # Time that it takes to move to next movement after CORRECT_MOVEMENT
+SHORT_DELAY_FOR_STRONG_FEEDBACK_MS = 1000 
 SERIAL_PORT = "COM3" # Serial Port that Connects to Arduino
 BAUD_RATE = 9600 # Correspond to the Baud Rate (taxa transmissão) of Arduino Code
 # --- Don't Change Further Code
@@ -1456,6 +1457,8 @@ class MainWindow(QMainWindow): # Keep as is
                 self.feedback_label.setText(self.tr('feedback_next_step'))
                 self.play_sound('NEXT_STEP')
                 QTimer.singleShot(ADVANCE_DELAY_MS, lambda: self.advance_step(intensity=intensity))
+
+                    QTimer.singleShot(SHORT_DELAY_FOR_STRONG_FEEDBACK_MS, show_next_step_feedback_and_schedule_advance)
 
     @Slot()
     def advance_step(self, intensity=0.0):
