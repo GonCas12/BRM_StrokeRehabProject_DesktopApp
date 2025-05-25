@@ -57,6 +57,7 @@ import serial
 import zmq
 import json
 import threading
+import numpy as np
 
 def run_application(existing_app=None):
     """
@@ -68,11 +69,6 @@ def run_application(existing_app=None):
     Returns:
         The exit code from the application
     """
-    import sys
-    from PyQt5.QtWidgets import QApplication
-    import pyqtgraph as pg
-    from PyQt5.QtGui import QIcon
-    import os
     
     # Use existing app or create a new one
     if existing_app:
@@ -641,7 +637,7 @@ class EMGProcessingWorker(QObject):
         last_time = time.time()
         
         while self.running:
-            if zmq_connected:
+            if zmq_connected and SIMULATE_EMG:
                 # Read data from ZMQ
                 try:
                     message = self.zmq_socket.recv_string()
@@ -719,6 +715,7 @@ class EMGProcessingWorker(QObject):
                     time.sleep(0.1)
                     continue
             else:
+                print("TESTTESTE")
                 # No ZMQ connection, generate simulated data
                 time.sleep(SIMULATION_DELAY_S)
                 status = random.choices(POSSIBLE_STATUSES, weights=STATUS_WEIGHTS, k=1)[0]
@@ -1473,6 +1470,8 @@ class MainWindow(QMainWindow): # Keep as is
                 'step_id': completed_step_info['id'],
                 'step_name_en': completed_step_info['name_en'], 
                 'step_name_pt': completed_step_info['name_pt'],
+                'movement_type_en': completed_step_info.get('movement_type_en', 'N/A'),
+                'movement_type_pt': completed_step_info.get('movement_type_pt', 'N/A'),
                 'time_taken_seconds': round(time_taken_for_step, 2),
                 'incorrect_attempts': self.current_step_attempts.get('INCORRECT_MOVEMENT', 0),
                 'weak_attempts': self.current_step_attempts.get('CORRECT_WEAK', 0),
