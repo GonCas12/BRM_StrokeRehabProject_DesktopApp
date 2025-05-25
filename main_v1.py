@@ -301,7 +301,7 @@ STRINGS = {
 
 # --- Sound Map ---
 SOUND_MAP = {
-    'NO_MOVEMENT': None, 'INCORRECT_MOVEMENT': SOUND_PATH + 'fail.wav',
+    'NO_MOVEMENT': SOUND_PATH + 'noSound.wav', 'INCORRECT_MOVEMENT': SOUND_PATH + 'fail.wav',
     'CORRECT_WEAK': SOUND_PATH + 'weak.wav', 'CORRECT_STRONG': SOUND_PATH + 'success.wav',
     'NEXT_STEP': SOUND_PATH + 'next_step.wav', 'FINISHED': SOUND_PATH + 'finished.wav'
 }
