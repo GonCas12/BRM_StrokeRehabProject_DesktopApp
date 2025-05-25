@@ -419,7 +419,7 @@ class EMGZmqBridge:
         self.classifier = EMGClassifier(model_path)
         
         # Buffer for plot data
-        self.plot_buffer_size = 100
+        self.plot_buffer_size = 200
         self.plot_buffer = np.zeros(self.plot_buffer_size)
         
         # State
@@ -484,6 +484,7 @@ class EMGZmqBridge:
             dc_offsets = np.mean(calibration_buffer, axis=1)
             baseline_energy = np.mean(np.square(calibration_buffer))
             print(f"Calibration complete. DC offsets: {dc_offsets}")
+            self.dc_offsets = dc_offsets
             
             # Create metadata for classifier
             metadata = {
@@ -497,7 +498,7 @@ class EMGZmqBridge:
             
             while self.running:
                 # Read new chunk
-                chunk_size = 200  # 100ms at 2000Hz
+                chunk_size = 200  # 200ms at 2000Hz
                 temp_buffer = np.zeros((2, chunk_size))
                 reader.read_many_sample(temp_buffer, chunk_size)
                 
@@ -506,12 +507,20 @@ class EMGZmqBridge:
                 
                 if movement is not None:
                     # Update plot buffer
+                    # Update plot buffer - get mean of absolute values across channels
                     signal = np.mean(np.abs(temp_buffer), axis=0)
+
+                    # Apply DC offset correction to each channel separately
+                    temp_buffer_corrected = temp_buffer.copy()
+                    for i in range(2):  # For each channel
+                        temp_buffer_corrected[i, :] = temp_buffer[i, :] - self.dc_offsets[i]
+
+                    # Update the plot buffer
                     self.plot_buffer = np.roll(self.plot_buffer, -len(signal))
                     self.plot_buffer[-len(signal):] = signal
-                    
-                    # Normalize plot data for visualization
-                    normalized_plot = self.plot_buffer / (np.max(self.plot_buffer) + 1e-6)
+
+                    # Scale to microvolts for better visualization
+                    plot_data = temp_buffer_corrected * 1000  # Convert to μV
                     
                     # Calculate status for app
                     if movement == "Rest":
@@ -527,7 +536,7 @@ class EMGZmqBridge:
                         'movement': movement,
                         'confidence': float(confidence) if confidence is not None else 0.0,
                         'intensity': float(intensity) if intensity is not None else 0.0,
-                        'plot_data': normalized_plot.tolist()
+                        'plot_data': plot_data.tolist()
                     }
                     
                     # Send over ZMQ

@@ -33,6 +33,7 @@ import datetime
 import os
 from platformdirs import user_data_dir
 import shutil  # For copying files
+import neurokit2 as nk
 
 from report_generator import generate_summary_report_for_patient
 
@@ -48,7 +49,7 @@ from PySide6.QtGui import QColor, QPalette, QPixmap, QIcon, QDesktopServices
 
 from emg_bridge_manager import EMGBridgeManager
 from PySide6.QtCore import QObject, Signal, Slot
-from PySide6.QtWidgets import QPushButton, QLabel, QComboBox, QCheckBox, QHBoxLayout, QFrame
+from PySide6.QtWidgets import QPushButton, QLabel, QComboBox, QCheckBox, QHBoxLayout, QFrame, QFileDialog
 
 import pyqtgraph as pg
 import serial
@@ -148,8 +149,6 @@ def run_application(existing_app=None):
             return result
 
 
-import neurokit2 as nk
-
 # --- Configuration ---
 UPDATE_INTERVAL_MS = 100
 ADVANCE_DELAY_MS = 2000 # Time that it takes to move to next movement after CORRECT_MOVEMENT
@@ -195,44 +194,64 @@ user_specific_data_path = user_data_dir(APP_NAME, APP_AUTHOR, roaming=False)
 OUTPUT_PATH = os.path.join(user_specific_data_path, "output")
 os.makedirs(OUTPUT_PATH, exist_ok=True)
 
-# --- Exercise Steps Definition ---
 EXERCISE_STEPS_TEMPLATE = [
-    {'id': 0, 'name_en': 'Rest', 'name_pt': 'Descansar', 'video': 'rest.mp4', 'movement_type_en': 'Rest', 'movement_type_pt': 'Repouso'},
-    {'id': 1, 'name_en': 'Reach for Cup', 'name_pt': 'Alcançar Copo', 'video': 'reach_cup.mp4', 'movement_type_en': 'Supination', 'movement_type_pt': 'Supinação'},
-    {'id': 2, 'name_en': 'Grasp Cup', 'name_pt': 'Agarrar Copo', 'video': 'grasp_cup.mp4', 'movement_type_en': 'Grasp', 'movement_type_pt': 'Agarrar'},
-    {'id': 3, 'name_en': 'Lift Cup', 'name_pt': 'Levantar Copo', 'video': 'lift_cup.mp4', 'movement_type_en': 'Flexion', 'movement_type_pt': 'Flexão'},
-    {'id': 4, 'name_en': 'Drink', 'name_pt': 'Beber', 'video': 'drink.mp4', 'movement_type_en': 'Pronation', 'movement_type_pt': 'Pronação'},
-    {'id': 5, 'name_en': 'Lower Cup', 'name_pt': 'Pousar Copo', 'video': 'lower_cup.mp4', 'movement_type_en': 'Extension', 'movement_type_pt': 'Extensão'},
+    {'id': 0, 'name_en': 'Rest', 'name_pt': 'Descansar', 'video': 'rest.mp4',
+     'movement_type_en': 'Rest', 'movement_type_pt': 'Repouso', 'expected_movement': 'Rest'},
+    {'id': 1, 'name_en': 'Reach for Cup', 'name_pt': 'Alcançar Copo', 'video': 'reach_cup.mp4',
+     'movement_type_en': 'Supination', 'movement_type_pt': 'Supinação', 'expected_movement': 'Supination'},
+    {'id': 2, 'name_en': 'Grasp Cup', 'name_pt': 'Agarrar Copo', 'video': 'grasp_cup.mp4',
+     'movement_type_en': 'Grasp', 'movement_type_pt': 'Agarrar', 'expected_movement': 'Grasp'},
+    {'id': 3, 'name_en': 'Lift Cup', 'name_pt': 'Levantar Copo', 'video': 'lift_cup.mp4',
+     'movement_type_en': 'Flexion', 'movement_type_pt': 'Flexão', 'expected_movement': 'Flexion'},
+    {'id': 4, 'name_en': 'Drink', 'name_pt': 'Beber', 'video': 'drink.mp4',
+     'movement_type_en': 'Pronation', 'movement_type_pt': 'Pronação', 'expected_movement': 'Pronation'},
+    {'id': 5, 'name_en': 'Lower Cup', 'name_pt': 'Pousar Copo', 'video': 'lower_cup.mp4',
+     'movement_type_en': 'Extension', 'movement_type_pt': 'Extensão', 'expected_movement': 'Extension'},
 ]
 
 SOUP_STEPS = [
-    EXERCISE_STEPS_TEMPLATE[0], # Rest
-    {'id': 6, 'name_en': 'Reach for Spoon', 'name_pt': 'Alcançar Colher', 'video': 'reach_spoon.mp4', 'movement_type_en': 'Extension', 'movement_type_pt': 'Extensão'},
-    {'id': 7, 'name_en': 'Grasp Spoon', 'name_pt': 'Agarrar Colher', 'video': 'grasp_spoon.mp4', 'movement_type_en': 'Grasp', 'movement_type_pt': 'Agarrar'},
-    {'id': 8, 'name_en': 'Scoop Soup', 'name_pt': 'Apanhar Sopa', 'video': 'scoop_soup.mp4', 'movement_type_en': 'Supination', 'movement_type_pt': 'Supinação'},
-    {'id': 9, 'name_en': 'Bring Spoon to Mouth', 'name_pt': 'Levar Colher à Boca', 'video': 'bring_spoon_mouth.mp4', 'movement_type_en': 'Flexion', 'movement_type_pt': 'Flexão'},
-    {'id': 10, 'name_en': 'Return Spoon to Bowl', 'name_pt': 'Devolver Colher à Tigela', 'video': 'return_spoon_bowl.mp4', 'movement_type_en': 'Extension', 'movement_type_pt': 'Extensão'},
-    {'id': 11, 'name_en': 'Lower Spoon', 'name_pt': 'Pousar Colher', 'video': 'lower_spoon.mp4', 'movement_type_en': 'Pronation', 'movement_type_pt': 'Pronação'},
+    {**EXERCISE_STEPS_TEMPLATE[0]}, # Rest
+    {'id': 6, 'name_en': 'Reach for Spoon', 'name_pt': 'Alcançar Colher', 'video': 'reach_spoon.mp4',
+     'movement_type_en': 'Extension', 'movement_type_pt': 'Extensão', 'expected_movement': 'Extension'},
+    {'id': 7, 'name_en': 'Grasp Spoon', 'name_pt': 'Agarrar Colher', 'video': 'grasp_spoon.mp4',
+     'movement_type_en': 'Grasp', 'movement_type_pt': 'Agarrar', 'expected_movement': 'Grasp'},
+    {'id': 8, 'name_en': 'Scoop Soup', 'name_pt': 'Apanhar Sopa', 'video': 'scoop_soup.mp4',
+     'movement_type_en': 'Supination', 'movement_type_pt': 'Supinação', 'expected_movement': 'Supination'},
+    {'id': 9, 'name_en': 'Bring Spoon to Mouth', 'name_pt': 'Levar Colher à Boca', 'video': 'bring_spoon_mouth.mp4',
+     'movement_type_en': 'Flexion', 'movement_type_pt': 'Flexão', 'expected_movement': 'Flexion'},
+    {'id': 10, 'name_en': 'Return Spoon to Bowl', 'name_pt': 'Devolver Colher à Tigela', 'video': 'return_spoon_bowl.mp4',
+     'movement_type_en': 'Extension', 'movement_type_pt': 'Extensão', 'expected_movement': 'Extension'},
+    {'id': 11, 'name_en': 'Lower Spoon', 'name_pt': 'Pousar Colher', 'video': 'lower_spoon.mp4',
+     'movement_type_en': 'Pronation', 'movement_type_pt': 'Pronação', 'expected_movement': 'Pronation'},
 ]
 
 BOOK_GRAB_STEPS = [
-    EXERCISE_STEPS_TEMPLATE[0], # Rest
-    {'id': 12, 'name_en': 'Reach for Book', 'name_pt': 'Alcançar Livro', 'video': 'reach_book.mp4', 'movement_type_en': 'Extension', 'movement_type_pt': 'Extensão'},
-    {'id': 13, 'name_en': 'Grasp Book', 'name_pt': 'Agarrar Livro', 'video': 'grasp_book.mp4', 'movement_type_en': 'Grasp', 'movement_type_pt': 'Agarrar'},
-    {'id': 14, 'name_en': 'Lift Book', 'name_pt': 'Levantar Livro', 'video': 'lift_book.mp4', 'movement_type_en': 'Flexion', 'movement_type_pt': 'Flexão'},
-    {'id': 15, 'name_en': 'Turn Book', 'name_pt': 'Roda Livro', 'video': 'turn_book_closer.mp4', 'movement_type_en': 'Supination', 'movement_type_pt': 'Supinação'},
-    {'id': 16, 'name_en': 'Lower Book', 'name_pt': 'Pousar Livro', 'video': 'lower_book.mp4', 'movement_type_en': 'Extension', 'movement_type_pt': 'Extensão'},
+    {**EXERCISE_STEPS_TEMPLATE[0]}, # Rest
+    {'id': 12, 'name_en': 'Reach for Book', 'name_pt': 'Alcançar Livro', 'video': 'reach_book.mp4',
+     'movement_type_en': 'Extension', 'movement_type_pt': 'Extensão', 'expected_movement': 'Extension'},
+    {'id': 13, 'name_en': 'Grasp Book', 'name_pt': 'Agarrar Livro', 'video': 'grasp_book.mp4',
+     'movement_type_en': 'Grasp', 'movement_type_pt': 'Agarrar', 'expected_movement': 'Grasp'},
+    {'id': 14, 'name_en': 'Lift Book', 'name_pt': 'Levantar Livro', 'video': 'lift_book.mp4',
+     'movement_type_en': 'Flexion', 'movement_type_pt': 'Flexão', 'expected_movement': 'Flexion'},
+    {'id': 15, 'name_en': 'Turn Book', 'name_pt': 'Roda Livro', 'video': 'turn_book_closer.mp4',
+     'movement_type_en': 'Supination', 'movement_type_pt': 'Supinação', 'expected_movement': 'Supination'},
+    {'id': 16, 'name_en': 'Lower Book', 'name_pt': 'Pousar Livro', 'video': 'lower_book.mp4',
+     'movement_type_en': 'Extension', 'movement_type_pt': 'Extensão', 'expected_movement': 'Extension'},
 ]
 
 DOOR_KNOB_STEPS = [
-    EXERCISE_STEPS_TEMPLATE[0], # Rest
-    {'id': 17, 'name_en': 'Reach for Door Knob', 'name_pt': 'Alcançar Maçaneta', 'video': 'reach_knob.mp4', 'movement_type_en': 'Extension', 'movement_type_pt': 'Extensão'},
-    {'id': 18, 'name_en': 'Grasp Door Knob', 'name_pt': 'Agarrar Maçaneta', 'video': 'grasp_knob.mp4', 'movement_type_en': 'Grasp', 'movement_type_pt': 'Agarrar'},
-    {'id': 19, 'name_en': 'Turn Door Knob', 'name_pt': 'Rodar Maçaneta', 'video': 'turn_knob.mp4', 'movement_type_en': 'Supination', 'movement_type_pt': 'Supinação'},
-    {'id': 20, 'name_en': 'Retract Hand', 'name_pt': 'Recuar Mão', 'video': 'retract_hand_knob.mp4', 'movement_type_en': 'Flexion', 'movement_type_pt': 'Flexão'},
-    {'id': 21, 'name_en': 'Release Door Knob', 'name_pt': 'Largar Maçaneta', 'video': 'release_knob.mp4', 'movement_type_en': 'Rest', 'movement_type_pt': 'Repouso'},
+    {**EXERCISE_STEPS_TEMPLATE[0]}, # Rest
+    {'id': 17, 'name_en': 'Reach for Door Knob', 'name_pt': 'Alcançar Maçaneta', 'video': 'reach_knob.mp4',
+     'movement_type_en': 'Extension', 'movement_type_pt': 'Extensão', 'expected_movement': 'Extension'},
+    {'id': 18, 'name_en': 'Grasp Door Knob', 'name_pt': 'Agarrar Maçaneta', 'video': 'grasp_knob.mp4',
+     'movement_type_en': 'Grasp', 'movement_type_pt': 'Agarrar', 'expected_movement': 'Grasp'},
+    {'id': 19, 'name_en': 'Turn Door Knob', 'name_pt': 'Rodar Maçaneta', 'video': 'turn_knob.mp4',
+     'movement_type_en': 'Supination', 'movement_type_pt': 'Supinação', 'expected_movement': 'Supination'},
+    {'id': 20, 'name_en': 'Retract Hand', 'name_pt': 'Recuar Mão', 'video': 'retract_hand_knob.mp4',
+     'movement_type_en': 'Flexion', 'movement_type_pt': 'Flexão', 'expected_movement': 'Flexion'},
+    {'id': 21, 'name_en': 'Release Door Knob', 'name_pt': 'Largar Maçaneta', 'video': 'release_knob.mp4',
+     'movement_type_en': 'Rest', 'movement_type_pt': 'Repouso', 'expected_movement': 'Rest'},
 ]
-
 # --- Text Strings (internationalization) ---
 STRINGS = {
     'en': {
@@ -451,7 +470,7 @@ class MovementTracker:
     def update(self, movement, confidence, timestamp):
         """Update movement state and detect completed movements"""
         completed_movement = None
-        
+        #print(f"Tracker update: {movement}, conf={confidence:.2f}")
         # Check for state changes
         if movement != self.current_movement:
             # Transitioning to a new movement
@@ -541,6 +560,9 @@ class EMGZmqReceiver:
         while self.running:
             try:
                 message = self.socket.recv_string()
+                # DEBUG: Print received messages for debugging
+                #print(f"ZMQ RECEIVED: {message[:100]}...")  # Print first 100 chars
+                
                 data = json.loads(message)
                 self.latest_data = data
             except zmq.error.Again:
@@ -971,24 +993,38 @@ class MainWindow(QMainWindow): # Keep as is
         self.session_report_data = []; self.current_step_start_time = None; self.current_step_attempts = {}
         self._start_new_session_tracking()
         self.sound_effects = {}; self.preload_sounds()
-        self.processing_thread = QThread(self); self.worker = EMGProcessingWorker()
-        self.worker.moveToThread(self.processing_thread)
-        self.worker.new_result.connect(self.handle_emg_result); self.worker.stopped.connect(self.on_worker_stopped)
-        self.processing_thread.started.connect(self.worker.run); self.worker.stopped.connect(self.processing_thread.quit)
-        self.worker.stopped.connect(self.worker.deleteLater); self.processing_thread.finished.connect(self.processing_thread.deleteLater)
         self.setup_ui()
         self.setWindowIcon(QIcon(IMAGE_PATH + "app_icon.png"))
         self.media_player.mediaStatusChanged.connect(self.handle_media_status_changed)
         self.setup_arduino()
-        # Create EMG Bridge Manager
+        # Create EMG bridge manager
         self.emg_bridge = EMGBridgeManager()
         self.emg_bridge.status_changed.connect(self.on_bridge_status_changed)
-        # Create EMG control widgets
+        
+        # Create movement tracker
+        self.movement_tracker = MovementTracker(
+            confidence_threshold=0.6,  # Adjust based on your needs
+            min_duration_s=0.3         # Minimum duration for valid movement
+        )
+        
+        # Set up EMG ZMQ receiver
+        self.emg_receiver = EMGZmqReceiver(port=5555)
+        self.emg_receiver.start()
+        
+        # Set up worker thread for processing
+        self.worker_thread = QThread()
+        self.emg_worker = EMGProcessingWorker(zmq_port=5555)
+        self.emg_worker.moveToThread(self.worker_thread)
+        self.worker_thread.started.connect(self.emg_worker.run)
+        self.emg_worker.stopped.connect(self.worker_thread.quit)
+        self.emg_worker.new_result.connect(self.handle_emg_result)
+        
+        # Start the worker thread
+        self.worker_thread.start()
         self.setup_emg_controls()
-        self.processing_thread.start(); self.advance_step()
+        self.advance_step()  # Removed reference to non-existent processing_thread
         self.pdf_thread = None
         self.pdf_worker = None
-
 
     def _start_new_session_tracking(self): # Keep as is
         self.session_start_time = datetime.datetime.now(); self.session_report_data = []
@@ -1054,7 +1090,7 @@ class MainWindow(QMainWindow): # Keep as is
 
         # EMG Plot
         self.plot_widget = pg.PlotWidget(title="EMG Signal (Simulated)")
-        self.plot_widget.setYRange(-1, 1)
+        self.plot_widget.setYRange(-500, 500)
         self.plot_widget.showGrid(x=False, y=True)
         self.emg_curve = self.plot_widget.plot(pen='b') # EMG plot line
         ex_top_layout.addWidget(self.plot_widget, stretch=2)
@@ -1221,7 +1257,7 @@ class MainWindow(QMainWindow): # Keep as is
             else: print(f" -> Warning: Sound {sound_key} not loaded. Attempting play anyway..."); sound_to_play.play()
 
     def setup_emg_controls(self):
-        """Set up simplified EMG data acquisition controls"""
+        """Set up EMG data acquisition controls with test file option"""
         # Create a frame for EMG controls
         emg_frame = QFrame()
         emg_frame.setFrameStyle(QFrame.StyledPanel | QFrame.Raised)
@@ -1238,6 +1274,12 @@ class MainWindow(QMainWindow): # Keep as is
         self.emg_start_button = QPushButton("Start EMG Acquisition")
         self.emg_start_button.clicked.connect(self.toggle_emg_acquisition)
         button_layout.addWidget(self.emg_start_button)
+        
+        # Test button
+        self.emg_test_button = QPushButton("Test with Recording")
+        self.emg_test_button.clicked.connect(self.start_emg_with_test_file)
+        button_layout.addWidget(self.emg_test_button)
+        
         emg_layout.addLayout(button_layout)
         
         # Status label
@@ -1245,10 +1287,37 @@ class MainWindow(QMainWindow): # Keep as is
         emg_layout.addWidget(self.emg_status_label)
         
         # Add the frame to the main layout at the bottom
-        # Find the main layout in your UI structure
         central_widget = self.centralWidget()
         if central_widget and central_widget.layout():
             central_widget.layout().addWidget(emg_frame)
+
+    def start_emg_with_test_file(self):
+        """Open file dialog to select test file and start EMG with it"""
+        options = QFileDialog.Options()
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Select EMG Test File", "", 
+            "NumPy Files (*.npy);;All Files (*)", 
+            options=options
+        )
+        
+        if file_path:
+            # Stop any running bridge
+            if self.emg_bridge.is_running:
+                self.emg_bridge.stop_bridge()
+                time.sleep(1)  # Give it time to stop
+            
+            # Start with test file
+            self.emg_start_button.setEnabled(False)
+            self.emg_test_button.setEnabled(False)
+            self.emg_status_label.setText(f"EMG Status: Starting with test file...")
+            
+            def start_bridge_thread():
+                success = self.emg_bridge.start_bridge(simulate=True, test_file=file_path)
+                # Use QTimer for thread-safe UI updates
+                QTimer.singleShot(0, lambda: self.emg_start_button.setEnabled(True))
+                QTimer.singleShot(0, lambda: self.emg_test_button.setEnabled(True))
+            
+            threading.Thread(target=start_bridge_thread, daemon=True).start()
 
     def toggle_emg_acquisition(self):
         """Start or stop EMG data acquisition with PySide6 compatibility"""
@@ -1302,34 +1371,56 @@ class MainWindow(QMainWindow): # Keep as is
     def handle_emg_result(self, result):
         # Update plot data
         if 'plot_data' in result:
-            self.emg_curve.setData(result['plot_data'])
-        
+            plot_data = result['plot_data']
+            
+            # Check if plot_data is 2D (multiple channels)
+            if isinstance(plot_data, list) and isinstance(plot_data[0], list):
+                # It's a 2D array - take channel 0 or average the channels
+                import numpy as np
+                
+                # Option 1: Just use channel 0 (biceps)
+                plot_data_1d = np.array(plot_data[0])
+                
+                # Option 2: Or average both channels
+                # plot_data_1d = np.mean(np.array(plot_data), axis=0)
+                
+            else:
+                # It's already 1D, just convert to numpy array
+                import numpy as np
+                plot_data_1d = np.array(plot_data)
+                
+            # Now set the 1D data to the plot
+            self.emg_curve.setData(plot_data_1d)
+            
         # Skip if not in an exercise step
         if not (0 <= self.current_step_index < len(self.current_exercise_steps_definition)):
             return
             
-        # Get basic data
-        status = result.get('status', 'NO_MOVEMENT')
-        intensity = result.get('intensity', 0.0)
-        timestamp = result.get('timestamp', 0)
-        
-        # Get movement type from classifier if available
+        # Get data from result
+        timestamp = result.get('timestamp', time.time())
         movement_type = result.get('movement', 'Rest')
         confidence = result.get('confidence', 0.0)
+        intensity = result.get('intensity', 0.0)
+
+        #print(f"Movement: {movement_type}, Conf: {confidence:.2f}, Int: {intensity:.4f}")
+        
+        # Update movement tracker
+        completed_movement = self.movement_tracker.update(movement_type, confidence, timestamp)
         
         # Get expected movement for this step
         step_info = self.current_exercise_steps_definition[self.current_step_index]
         expected_movement = step_info.get('expected_movement', None)
+        step_confidence_threshold = step_info.get('feedback_threshold', 0.65)
         
-        # Determine correct status based on movement and step requirements
-        if status == 'IDLE' or movement_type == 'Rest' or intensity < 0.2:
+        # Determine status based on movement and step requirements
+        if confidence < 0.4:  # Low confidence movements are treated as rest
             status = 'NO_MOVEMENT'
         elif expected_movement and expected_movement != movement_type:
             # Wrong movement type detected
             status = 'INCORRECT_MOVEMENT'
         else:
             # Correct movement type
-            if intensity >= 0.5:
+            if confidence >= step_confidence_threshold:
                 status = 'CORRECT_STRONG'
             else:
                 status = 'CORRECT_WEAK'
@@ -1348,7 +1439,7 @@ class MainWindow(QMainWindow): # Keep as is
         feedback_key = status_to_key_map.get(status, 'feedback_initializing')
         
         # Add movement type to feedback if available
-        if movement_type != 'Rest' and confidence > 0.6:
+        if movement_type != 'Rest' and confidence > 0.5:
             movement_feedback = f" ({movement_type}: {confidence:.2f})"
             self.feedback_label.setText(self.tr(feedback_key) + movement_feedback)
         else:
@@ -1357,38 +1448,69 @@ class MainWindow(QMainWindow): # Keep as is
         self.set_feedback_style(status)
         self.play_sound(status)
         
-        # Advance on successful strong movement
-        if status == 'CORRECT_STRONG' and self.advance_on_success:
+        # Advance on completed correct movement
+        if completed_movement and completed_movement['type'] == expected_movement:
             if self.last_successful_status_time == 0:
                 self.last_successful_status_time = timestamp
-                print(f"Correct+Strong detected at {timestamp}. Movement: {movement_type} with confidence {confidence:.2f}. Advancing.")
+                print(f"Movement completed: {completed_movement['type']} ({completed_movement['duration']:.2f}s)")
                 self.feedback_label.setText(self.tr('feedback_next_step'))
                 self.play_sound('NEXT_STEP')
                 QTimer.singleShot(ADVANCE_DELAY_MS, lambda: self.advance_step(intensity=intensity))
 
     @Slot()
-    def advance_step(self, intensity=0.0): # Keep as is
+    def advance_step(self, intensity=0.0):
+        """Advance to the next step after a successful movement"""
         if self.current_step_start_time is not None and \
-           0 <= self.current_step_index < len(self.current_exercise_steps_definition):
+        0 <= self.current_step_index < len(self.current_exercise_steps_definition):
+            # Record step completion data
             time_taken_for_step = time.time() - self.current_step_start_time
             completed_step_info = self.current_exercise_steps_definition[self.current_step_index]
+            
+            # Get movement data for this step
+            expected_movement = completed_step_info.get('expected_movement', None)
+            matching_movements = [m for m in self.movement_tracker.completed_movements 
+                                if m['type'] == expected_movement]
+            
+            # Calculate movement metrics
+            movement_count = len(matching_movements)
+            avg_duration = 0
+            avg_confidence = 0
+            
+            if matching_movements:
+                avg_duration = sum(m['duration'] for m in matching_movements) / movement_count
+                avg_confidence = sum(m['confidence'] for m in matching_movements) / movement_count
+            
+            # Create step report
             step_data = {
                 'step_id': completed_step_info['id'],
-                'step_name_en': completed_step_info['name_en'], 'step_name_pt': completed_step_info['name_pt'],
-                'movement_type_en': completed_step_info.get('movement_type_en', 'N/A'),
-                'movement_type_pt': completed_step_info.get('movement_type_pt', 'N/A'),
+                'step_name_en': completed_step_info['name_en'], 
+                'step_name_pt': completed_step_info['name_pt'],
                 'time_taken_seconds': round(time_taken_for_step, 2),
                 'incorrect_attempts': self.current_step_attempts.get('INCORRECT_MOVEMENT', 0),
                 'weak_attempts': self.current_step_attempts.get('CORRECT_WEAK', 0),
-                'no_movement_attempts': self.current_step_attempts.get('NO_MOVEMENT', 0)
+                'no_movement_attempts': self.current_step_attempts.get('NO_MOVEMENT', 0),
+                'movement_count': movement_count,
+                'avg_movement_duration': round(avg_duration, 2),
+                'avg_movement_confidence': round(avg_confidence, 2)
             }
+            
             self.session_report_data.append(step_data)
             print(f"Step {self.current_step_index + 1} completed. Data: {step_data}")
+        
+        # Reset for next step
         self.current_step_start_time = None
+        self.last_successful_status_time = 0
+        
+        # Send robot command if needed
         if self.current_step_index >= 0 and intensity > 0:
-             if 0 <= self.current_step_index < len(self.current_exercise_steps_definition):
-                 step_info = self.current_exercise_steps_definition[self.current_step_index]
-                 self.send_robot_command(step_info['id'], intensity)
+            if 0 <= self.current_step_index < len(self.current_exercise_steps_definition):
+                step_info = self.current_exercise_steps_definition[self.current_step_index]
+                self.send_robot_command(step_info['id'], intensity)
+        
+        # Clear movement history for the next step
+        self.movement_tracker.completed_movements = []
+        
+        # Advance to next step
         self.current_step_index += 1
         self.load_step()
 
