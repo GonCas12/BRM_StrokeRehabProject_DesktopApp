@@ -256,6 +256,8 @@ STRINGS = {
         'feedback_incorrect': "Incorrect Movement Detected. Please try again.",
         'feedback_weak': "Correct Movement, but more force needed.",
         'feedback_strong': "Correct Movement + Sufficient Force! Well done!",
+        'feedback_correct_in_progress': "Correct Movement - Keep going!",
+        'feedback_movement_completed': "Movement Completed! Moving to next step...",
         'feedback_next_step': "Moving to the next step...",
         'feedback_finished': "Exercise sequence complete! Well Done!",
         'button_next_manual': "Next Step (Manual)",
@@ -341,6 +343,8 @@ STRINGS = {
         'feedback_incorrect': "Movimento Incorreto Detetado. Tente novamente.",
         'feedback_weak': "Movimento Correto, mas precisa de mais força.",
         'feedback_strong': "Movimento Correto + Força Suficiente! Bom trabalho!",
+        'feedback_correct_in_progress': "Movimento Correto - Continue!",
+        'feedback_movement_completed': "Movimento Completo! Avançando para o próximo passo...",
         'feedback_next_step': "A avançar para o próximo passo...",
         'feedback_finished': "Sequência de exercícios completa! Parabéns!",
         'button_next_manual': "Próximo Passo (Manual)",
@@ -740,6 +744,9 @@ class MainWindow(QMainWindow):
         self.session_report_data = []
         self.current_step_start_time = None
         self.current_step_attempts = {}
+
+        self.last_feedback_state = None  # Track last feedback to avoid spam
+        self.feedback_update_cooldown = 0  # Cooldown to prevent too frequent updates
         
         # Initialize threading references
         self.daq_thread = None
@@ -1008,22 +1015,58 @@ class MainWindow(QMainWindow):
             self.play_sound('FINISHED')
             self._generate_and_save_report()
 
-    def set_feedback_style(self, status): # Keep as is
-        palette = self.feedback_label.palette(); color = QColor('lightgray')
-        if status == 'CORRECT_STRONG': color = QColor('lightgreen')
-        elif status == 'CORRECT_WEAK': color = QColor('lightyellow')
-        elif status == 'INCORRECT_MOVEMENT': color = QColor('lightcoral')
-        elif status == 'finished': color = QColor('lightblue')
-        elif status == 'error': color = QColor('orangered')
-        palette.setColor(QPalette.Window, color); self.feedback_label.setPalette(palette)
+    def set_feedback_style(self, status):
+        """Updated feedback style with new movement states"""
+        palette = self.feedback_label.palette()
+        
+        if status == 'CORRECT_STRONG':
+            color = QColor('lightgreen')  # Keep for completed movements
+        elif status == 'CORRECT_IN_PROGRESS':  # New state
+            color = QColor('lightyellow')  # Yellow for movement in progress
+        elif status == 'CORRECT_WEAK':
+            color = QColor('lightyellow')  # Also yellow for weak but correct
+        elif status == 'INCORRECT_MOVEMENT':
+            color = QColor('lightcoral')
+        elif status == 'NO_MOVEMENT':
+            color = QColor('lightgray')
+        elif status == 'finished':
+            color = QColor('lightblue')
+        elif status == 'error':
+            color = QColor('orangered')
+        else:  # initializing
+            color = QColor('lightgray')
+        
+        palette.setColor(QPalette.Window, color)
+        self.feedback_label.setPalette(palette)
 
-    def play_sound(self, sound_key): # Keep as is
+    def play_sound(self, sound_key):
+        """Fixed play_sound to prevent audio cutting"""
         if sound_key in self.sound_effects and self.sound_effects[sound_key]:
             sound_to_play = self.sound_effects[sound_key]
-            for effect_playing in self.sound_effects.values():
-                 if effect_playing is not None and effect_playing.isPlaying(): effect_playing.stop()
-            if sound_to_play.isLoaded(): sound_to_play.play()
-            else: print(f" -> Warning: Sound {sound_key} not loaded. Attempting play anyway..."); sound_to_play.play()
+            
+            # DON'T stop all sounds - only stop the same sound if it's playing
+            if sound_to_play.isPlaying():
+                sound_to_play.stop()
+            
+            # Only stop conflicting sounds (e.g., don't play success and fail at same time)
+            conflicting_sounds = {
+                'CORRECT_STRONG': ['INCORRECT_MOVEMENT', 'CORRECT_WEAK'],
+                'INCORRECT_MOVEMENT': ['CORRECT_STRONG', 'CORRECT_WEAK'],
+                'CORRECT_WEAK': ['INCORRECT_MOVEMENT'],
+            }
+            
+            if sound_key in conflicting_sounds:
+                for conflict_key in conflicting_sounds[sound_key]:
+                    if (conflict_key in self.sound_effects and 
+                        self.sound_effects[conflict_key] and 
+                        self.sound_effects[conflict_key].isPlaying()):
+                        self.sound_effects[conflict_key].stop()
+            
+            if sound_to_play.isLoaded():
+                sound_to_play.play()
+            else:
+                print(f"Warning: Sound {sound_key} not loaded. Attempting play anyway...")
+                sound_to_play.play()
 
     def setup_emg_threading(self):
         """Set up EMG data acquisition and processing in separate threads"""
@@ -1231,12 +1274,38 @@ class MainWindow(QMainWindow):
         
         if file_path:
             print(f"Starting EMG with test file: {file_path}")
-            # Stop current acquisition if running
-            if hasattr(self, 'daq_worker') and self.daq_worker:
-                self.cleanup_emg_threads()
             
-            # Wait a moment for cleanup
-            QTimer.singleShot(1000, lambda: self.setup_emg_with_file(file_path))
+            # Set the global file path BEFORE stopping current acquisition
+            import mock_nidaqmx_module as nidaqmx
+            nidaqmx.PRE_RECORDED_DATA_FILE = file_path
+            
+            # Reload the data file
+            if nidaqmx.reload_data_file():
+                print("Successfully loaded new test file")
+            else:
+                print("Failed to load test file, will use synthetic data")
+            
+            # Stop current acquisition if running
+            if hasattr(self, 'daq_worker') and self.daq_worker and self.emg_running:
+                print("Stopping current EMG acquisition...")
+                self.cleanup_emg_threads()
+                
+                # Wait for cleanup, then restart
+                QTimer.singleShot(2000, self.restart_emg_with_new_file)
+            else:
+                # No acquisition running, start directly
+                self.restart_emg_with_new_file()
+
+    def restart_emg_with_new_file(self):
+        """Restart EMG acquisition after file change"""
+        try:
+            print("Restarting EMG acquisition with new file...")
+            self.setup_emg_threading()
+            print("EMG restarted successfully")
+        except Exception as e:
+            print(f"Error restarting EMG: {e}")
+            if hasattr(self, 'emg_status_label'):
+                self.emg_status_label.setText(f"EMG Status: Restart failed - {e}")
 
     def setup_emg_with_file(self, file_path):
         """Set up EMG system with a specific test file"""
@@ -1363,9 +1432,8 @@ class MainWindow(QMainWindow):
                 print("Video ended, looping..."); self.media_player.setPosition(0); self.media_player.play()
 
     @Slot(dict)
-    @Slot(dict)
     def handle_emg_result(self, result):
-        # Update plot data
+        # Update plot data (keep this part as is)
         if 'plot_data' in result:
             plot_data = result['plot_data']
             current_time = result.get('timestamp', time.time())
@@ -1380,9 +1448,9 @@ class MainWindow(QMainWindow):
             
             # Handle 2D data (multiple channels)
             if plot_data.ndim == 2:
-                if plot_data.shape[0] == 4:  # 2 channels, samples in columns
+                if plot_data.shape[0] == 4:  # 4 channels, samples in columns
                     plot_data_1d = plot_data[0, :]  # Use first channel
-                elif plot_data.shape[1] == 4:  # samples in rows, 2 channels in columns
+                elif plot_data.shape[1] == 4:  # samples in rows, 4 channels in columns
                     plot_data_1d = plot_data[:, 0]  # Use first channel
                 else:
                     plot_data_1d = plot_data.flatten()
@@ -1394,7 +1462,6 @@ class MainWindow(QMainWindow):
             
             # Create time array for this chunk
             chunk_size = len(plot_data_1d)
-            relative_time = current_time - self.plot_start_time
             
             # Generate time points for this chunk
             if len(self.plot_time) == 0:
@@ -1430,7 +1497,7 @@ class MainWindow(QMainWindow):
                     max(0, self.plot_time[-1] - 4.0),  # Show last 4 seconds
                     self.plot_time[-1] + 0.1  # Small margin
                 )
-            
+
         # Skip if not in an exercise step
         if not (0 <= self.current_step_index < len(self.current_exercise_steps_definition)):
             return
@@ -1441,8 +1508,8 @@ class MainWindow(QMainWindow):
         confidence = result.get('confidence', 0.0)
         intensity = result.get('intensity', 0.0)
 
-        #print(f"Movement: {movement_type}, Conf: {confidence:.2f}, Int: {intensity:.4f}")
-        
+        print(f"EMG Result: {movement_type} (confidence: {confidence:.2f}, intensity: {intensity:.2f}) at {timestamp}")
+
         # Update movement tracker
         completed_movement = self.movement_tracker.update(movement_type, confidence, timestamp)
         
@@ -1451,53 +1518,61 @@ class MainWindow(QMainWindow):
         expected_movement = step_info.get('expected_movement', None)
         step_confidence_threshold = step_info.get('feedback_threshold', 0.65)
         
-        # Determine status based on movement and step requirements
-        if confidence < 0.4:  # Low confidence movements are treated as rest
-            status = 'NO_MOVEMENT'
-        elif expected_movement and expected_movement != movement_type:
-            # Wrong movement type detected
-            status = 'INCORRECT_MOVEMENT'
-        else:
-            # Correct movement type
-            if confidence >= step_confidence_threshold:
-                status = 'CORRECT_STRONG'
-            else:
-                status = 'CORRECT_WEAK'
+        # NEW IMPROVED FEEDBACK LOGIC - No more confidence values in UI!
         
-        # Track attempts
-        if status in self.current_step_attempts:
-            self.current_step_attempts[status] += 1
-        
-        # Update feedback
-        status_to_key_map = {
-            'NO_MOVEMENT': 'feedback_no_movement',
-            'INCORRECT_MOVEMENT': 'feedback_incorrect',
-            'CORRECT_WEAK': 'feedback_weak',
-            'CORRECT_STRONG': 'feedback_strong'
-        }
-        feedback_key = status_to_key_map.get(status, 'feedback_initializing')
-        
-        # Add movement type to feedback if available
-        if movement_type != 'Rest' and confidence > 0.5:
-            movement_feedback = f" ({movement_type}: {confidence:.2f})"
-            self.feedback_label.setText(self.tr(feedback_key) + movement_feedback)
-        else:
-            self.feedback_label.setText(self.tr(feedback_key))
-        
-        self.set_feedback_style(status)
-        self.play_sound(status)
-        
-        # Advance on completed correct movement
+        # Check if movement was completed by tracker
         if completed_movement and completed_movement['type'] == expected_movement:
+            # Movement completed! Show green feedback and advance
             if self.last_successful_status_time == 0:
                 self.last_successful_status_time = timestamp
                 print(f"Movement completed: {completed_movement['type']} ({completed_movement['duration']:.2f}s)")
-                def show_next_step_feedback_and_schedule_advance():
+                
+                # Show completion feedback
+                self.feedback_label.setText(self.tr('feedback_movement_completed'))
+                self.set_feedback_style('CORRECT_STRONG')
+                self.play_sound('CORRECT_STRONG')
+                
+                # Schedule the "next step" feedback and advancement
+                def show_next_step_feedback_and_advance():
                     self.feedback_label.setText(self.tr('feedback_next_step'))
                     self.play_sound('NEXT_STEP')
                     QTimer.singleShot(ADVANCE_DELAY_MS, lambda: self.advance_step(intensity=intensity))
 
-                QTimer.singleShot(SHORT_DELAY_FOR_STRONG_FEEDBACK_MS, show_next_step_feedback_and_schedule_advance)
+                QTimer.singleShot(SHORT_DELAY_FOR_STRONG_FEEDBACK_MS, show_next_step_feedback_and_advance)
+        
+        else:
+            # No completed movement yet - provide ongoing feedback
+            if confidence < 0.4:  # Low confidence movements are treated as rest
+                self.feedback_label.setText(self.tr('feedback_no_movement'))
+                self.set_feedback_style('NO_MOVEMENT')
+                # Don't play sound for no movement to avoid spam
+                
+            elif expected_movement and movement_type != expected_movement and movement_type != 'Rest':
+                # Wrong movement type detected
+                self.feedback_label.setText(self.tr('feedback_incorrect'))
+                self.set_feedback_style('INCORRECT_MOVEMENT')
+                self.play_sound('INCORRECT_MOVEMENT')
+                
+                # Track incorrect attempts
+                if 'INCORRECT_MOVEMENT' in self.current_step_attempts:
+                    self.current_step_attempts['INCORRECT_MOVEMENT'] += 1
+                
+            elif movement_type == expected_movement:
+                # Correct movement type detected, but not completed yet
+                if confidence >= step_confidence_threshold:
+                    # Strong enough signal - encourage to continue
+                    self.feedback_label.setText(self.tr('feedback_correct_in_progress'))
+                    self.set_feedback_style('CORRECT_IN_PROGRESS')  # Yellow
+                    self.play_sound('CORRECT_WEAK')  # Soft encouragement sound
+                else:
+                    # Weak signal - ask for more force
+                    self.feedback_label.setText(self.tr('feedback_weak'))
+                    self.set_feedback_style('CORRECT_WEAK')
+                    self.play_sound('CORRECT_WEAK')
+                    
+                    # Track weak attempts
+                    if 'CORRECT_WEAK' in self.current_step_attempts:
+                        self.current_step_attempts['CORRECT_WEAK'] += 1
 
     @Slot()
     def advance_step(self, intensity=0.0):

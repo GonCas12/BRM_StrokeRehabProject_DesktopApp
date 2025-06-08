@@ -1,0 +1,27 @@
+Exercise Sequence Summary
+========================
+
+Created: 20250608_185128
+Type: No rest periods between movements
+Total duration: 15.25 seconds
+Total samples: 30500
+Channels: 4
+
+Sequence Timeline:
+--------------------------------------------------
+  0.00s -   1.00s: Initial Rest (Rest)
+  1.00s -   2.65s: Reach for Cup (Supination)
+  2.65s -   4.50s: Grasp Cup (Grasp_Power)
+  4.50s -  10.15s: Lift Cup (Flexion)
+ 10.15s -  11.90s: Drink (Pronation)
+ 11.90s -  14.25s: Lower Cup (Extension)
+ 14.25s -  15.25s: Final Rest (Rest)
+
+Movement Distribution:
+------------------------------
+Rest: 4000 samples (13.1%)
+Supination: 3300 samples (10.8%)
+Grasp_Power: 3700 samples (12.1%)
+Flexion: 11300 samples (37.0%)
+Pronation: 3500 samples (11.5%)
+Extension: 4700 samples (15.4%)

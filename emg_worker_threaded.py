@@ -6,75 +6,48 @@ from scipy import signal
 from PySide6.QtCore import QObject, Signal, QThread, QTimer, Slot
 import mock_nidaqmx_module as nidaqmx
 
-def preprocess_emg(emg_data, metadata, apply_filters=True):
-    """
-    Preprocess EMG data using metadata for offset correction - UPDATED VERSION
-    """
+def preprocess_emg(emg_data, metadata, dc_tracker, apply_filters=True):
+    """EMG preprocessing with adaptive DC offset correction"""
     n_channels, n_samples = emg_data.shape
     processed_data = np.zeros_like(emg_data)
     
-    # 1. Apply DC offset correction using metadata
-    dc_offsets = metadata['dc_offsets']
     sampling_rate = metadata['sampling_rate']
-
-    # Handle sampling rate conversion (from numpy array to scalar if needed)
     if isinstance(sampling_rate, np.ndarray):
-        if sampling_rate.ndim == 0:  # It's a 0-d array (scalar)
-            sampling_rate = float(sampling_rate.item())
-        else:  # It's a regular array
-            sampling_rate = float(sampling_rate[0])
-    elif isinstance(sampling_rate, (list, tuple)):
-        sampling_rate = float(sampling_rate[0])
-    elif not isinstance(sampling_rate, (int, float)):
-        sampling_rate = float(sampling_rate)
+        sampling_rate = float(sampling_rate.item() if sampling_rate.ndim == 0 else sampling_rate[0])
     
-    print(f"Using DC offsets from metadata: {dc_offsets}")
+    current_dc_offsets = []
     
-    # Design filters if needed
-    if apply_filters:
-        # 1. Bandpass filter design (20-450Hz)
-        lowcut = 20.0  # Hz
-        highcut = 450.0  # Hz
-        nyquist = 0.5 * sampling_rate
-        low = lowcut / nyquist
-        high = highcut / nyquist
-        
-        # Check if filter parameters are valid
-        if low >= 1.0 or high >= 1.0:
-            print(f"Warning: Filter frequencies ({lowcut}, {highcut}) too high for sampling rate {sampling_rate}")
-            low = min(0.95, low)
-            high = min(0.99, high)
-            
-        order_bandpass = 4  # Butterworth filter order
-        sos_bandpass = signal.butter(order_bandpass, [low, high], btype='band', output='sos')
-        
-        # 2. Notch filter design (50Hz)
-        notch_freq = 50.0  # Hz (power line interference)
-        quality_factor = 30.0  # Q factor - determines bandwidth
-        b_notch, a_notch = signal.iirnotch(notch_freq, quality_factor, sampling_rate)
-        sos_notch = signal.tf2sos(b_notch, a_notch)
-        
-        print(f"Applying bandpass filter ({lowcut}-{highcut}Hz) and 50Hz notch filter")
-    
-    # Process each channel
     for c in range(n_channels):
-        # Get channel data
         channel_data = emg_data[c, :].copy()
         
+        # Get adaptive DC offset for this channel
+        adaptive_dc_offset = dc_tracker.update_dc_offset(channel_data, c)
+        current_dc_offsets.append(adaptive_dc_offset)
+        
         # Apply DC offset correction
-        dc_offset = dc_offsets[c] if c < len(dc_offsets) else np.mean(channel_data)
-        channel_data = channel_data - dc_offset
+        channel_data = channel_data - adaptive_dc_offset
         
+        # Apply filtering if requested
         if apply_filters:
-            # Apply bandpass filter
-            channel_data = signal.sosfilt(sos_bandpass, channel_data)
+            # Your existing filtering code here
+            lowcut, highcut = 20.0, 450.0
+            nyquist = 0.5 * sampling_rate
+            low, high = lowcut / nyquist, highcut / nyquist
             
-            # Apply notch filter
-            channel_data = signal.sosfilt(sos_notch, channel_data)
+            if low < 1.0 and high < 1.0:
+                order_bandpass = 4
+                sos_bandpass = signal.butter(order_bandpass, [low, high], btype='band', output='sos')
+                channel_data = signal.sosfilt(sos_bandpass, channel_data)
+                
+                # Notch filter
+                notch_freq, quality_factor = 50.0, 30.0
+                b_notch, a_notch = signal.iirnotch(notch_freq, quality_factor, sampling_rate)
+                sos_notch = signal.tf2sos(b_notch, a_notch)
+                channel_data = signal.sosfilt(sos_notch, channel_data)
         
-        # Store processed data
         processed_data[c, :] = channel_data
     
+    print(f"Adaptive DC offsets: {current_dc_offsets}")
     return processed_data
 
 def apply_bandpass_filter(signal_data, low_freq, high_freq, sampling_rate):
@@ -151,7 +124,7 @@ def extract_features_with_context(windows, history_size=3, sampling_rate=2000):
     # Total features per channel
     num_features_per_channel = num_basic_features_per_channel + num_enhanced_rms_features
     
-    print(f"Features per channel: {num_basic_features_per_channel} basic + {num_enhanced_rms_features} RMS = {num_features_per_channel}")
+    #print(f"Features per channel: {num_basic_features_per_channel} basic + {num_enhanced_rms_features} RMS = {num_features_per_channel}")
     
     # Cross-channel correlation features
     num_cross_channel_features = (n_data_channels * (n_data_channels - 1)) // 2
@@ -183,7 +156,7 @@ def extract_features_with_context(windows, history_size=3, sampling_rate=2000):
     # Total features for current window
     num_current_window_features = (n_data_channels * num_features_per_channel) + num_cross_channel_features + num_ratio_features
     
-    print(f"Total features per window: {n_data_channels} channels * {num_features_per_channel} + {num_cross_channel_features} cross-channel + {num_ratio_features} ratios = {num_current_window_features}")
+    #print(f"Total features per window: {n_data_channels} channels * {num_features_per_channel} + {num_cross_channel_features} cross-channel + {num_ratio_features} ratios = {num_current_window_features}")
     
     # Array to store features
     features_current_window_array = np.zeros((n_windows, num_current_window_features))
@@ -301,7 +274,7 @@ def extract_features_with_context(windows, history_size=3, sampling_rate=2000):
             features_current_window_array[w, feature_idx] = antagonistic_ratio_fe
             feature_idx += 1
 
-    print(f"Extracted features shape: {features_current_window_array.shape}")
+    #print(f"Extracted features shape: {features_current_window_array.shape}")
 
     # Add temporal context (delta features)
     if history_size <= 0 or n_windows <= history_size:
@@ -366,6 +339,96 @@ def get_feature_names_for_data(n_channels):
     
     return generate_complete_feature_names(n_channels, basic_features, include_context=True)
 
+class AdaptiveDCOffsetTracker:
+    def __init__(self, window_size_seconds=10, sampling_rate=2000, update_rate=0.1, initial_dc_offsets=None):
+        self.window_size = int(window_size_seconds * sampling_rate)
+        self.update_rate = update_rate
+        self.sampling_rate = sampling_rate
+        
+        # Store initial calibration offsets
+        self.initial_dc_offsets = initial_dc_offsets or {}
+        
+        # Rolling buffers for each channel
+        self.history_buffers = {}
+        self.current_dc_estimates = {}
+        self.buffer_filled = {}
+        self.samples_collected = {}  # Track how much data we have
+        
+    def update_dc_offset(self, channel_data, channel_id):
+        """Update DC offset with smooth transition from calibration to adaptive"""
+        
+        # Initialize channel if first time
+        if channel_id not in self.history_buffers:
+            self.history_buffers[channel_id] = np.zeros(self.window_size)
+            self.buffer_filled[channel_id] = False
+            self.samples_collected[channel_id] = 0
+            
+            # Use calibration offset as initial estimate
+            if channel_id in self.initial_dc_offsets:
+                self.current_dc_estimates[channel_id] = self.initial_dc_offsets[channel_id]
+                print(f"Channel {channel_id}: Starting with calibration DC offset: {self.initial_dc_offsets[channel_id]:.6f}")
+            else:
+                self.current_dc_estimates[channel_id] = np.mean(channel_data)
+                print(f"Channel {channel_id}: No calibration data, using chunk mean: {np.mean(channel_data):.6f}")
+        
+        buffer = self.history_buffers[channel_id]
+        chunk_size = len(channel_data)
+        
+        # Update sample count
+        self.samples_collected[channel_id] += chunk_size
+        
+        # Roll buffer and add new data
+        if chunk_size >= self.window_size:
+            buffer[:] = channel_data[-self.window_size:]
+            self.buffer_filled[channel_id] = True
+        else:
+            buffer[:-chunk_size] = buffer[chunk_size:]
+            buffer[-chunk_size:] = channel_data
+            
+            # Check if we have enough data
+            if self.samples_collected[channel_id] >= self.window_size:
+                self.buffer_filled[channel_id] = True
+        
+        # Calculate DC offset based on how much data we have
+        if self.buffer_filled[channel_id]:
+            # Full adaptive mode - use rolling window
+            new_dc_estimate = np.median(buffer)
+            
+            # Exponential moving average
+            old_estimate = self.current_dc_estimates[channel_id]
+            self.current_dc_estimates[channel_id] = (
+                (1 - self.update_rate) * old_estimate + 
+                self.update_rate * new_dc_estimate
+            )
+            
+        else:
+            # Transition period - blend calibration with current data
+            data_completeness = self.samples_collected[channel_id] / self.window_size
+            
+            # Calculate current data DC estimate
+            valid_buffer = buffer[buffer != 0] if np.any(buffer != 0) else buffer
+            if len(valid_buffer) > 100:  # Need reasonable amount of data
+                current_data_dc = np.median(valid_buffer)
+            else:
+                current_data_dc = np.mean(channel_data)
+            
+            # Blend: more weight to calibration initially, then shift to current data
+            calibration_weight = 1.0 - data_completeness
+            current_data_weight = data_completeness
+            
+            calibration_dc = self.initial_dc_offsets.get(channel_id, current_data_dc)
+            
+            self.current_dc_estimates[channel_id] = (
+                calibration_weight * calibration_dc + 
+                current_data_weight * current_data_dc
+            )
+            
+            print(f"Channel {channel_id}: Transition mode - {data_completeness*100:.1f}% data collected, "
+                  f"DC = {calibration_weight:.2f}*{calibration_dc:.6f} + {current_data_weight:.2f}*{current_data_dc:.6f} "
+                  f"= {self.current_dc_estimates[channel_id]:.6f}")
+        
+        return self.current_dc_estimates[channel_id]
+    
 class EMGClassifier:
     def __init__(self, model_path="best_temporal_emg_model.pkl"):
         print(f"Loading model from {model_path}")
@@ -444,6 +507,12 @@ class EMGClassifier:
             self.current_state = "Rest"
             self.current_confidence = 0.0
             self.feature_history = []
+
+            self.dc_tracker = AdaptiveDCOffsetTracker(
+                window_size_seconds=6,  # Use 6 seconds of history
+                update_rate=0.05,        # Slow adaptation (5%)
+                sampling_rate=2000
+            )
             
         except Exception as e:
             print(f"Detailed error loading model: {e}")
@@ -480,8 +549,15 @@ class EMGClassifier:
                 self.buffer[:, -chunk_size:] = new_data_chunk
             
             # Preprocess the buffer
-            processed_data = preprocess_emg(self.buffer, metadata, apply_filters=True)
+            processed_data = preprocess_emg(self.buffer, metadata, self.dc_tracker, apply_filters=True)
+            raw_intensity = np.sqrt(np.mean(self.buffer**2))
             signal_intensity = np.sqrt(np.mean(processed_data**2))
+            
+            print(f"Intensity calculation:")
+            print(f"  Raw buffer intensity: {raw_intensity:.6f}")
+            print(f"  Processed intensity: {signal_intensity:.6f}")
+            print(f"  Buffer shape: {self.buffer.shape}")
+            print(f"  Processed shape: {processed_data.shape}")
             
             # Extract features using the updated function
             window = np.expand_dims(processed_data, axis=0)
@@ -677,7 +753,7 @@ class EMGDataAcquisitionWorker(QObject):
                 self.reader.read_many_sample(temp_buffer, chunk_size)
                 
                 # Debug: Print actual data shape
-                print(f"DAQ Worker: Read data chunk shape: {temp_buffer.shape}")
+                #print(f"DAQ Worker: Read data chunk shape: {temp_buffer.shape}")
                 
                 # Emit data to processing thread
                 self.data_ready.emit(temp_buffer, self.metadata)
@@ -753,6 +829,9 @@ class EMGProcessingWorker(QObject):
             if not self.classifier:
                 return
             
+            raw_rms = np.sqrt(np.mean(data_chunk**2))
+            raw_max = np.max(np.abs(data_chunk))
+            print(f"Raw data - RMS: {raw_rms:.6f}, Max: {raw_max:.6f}, Shape: {data_chunk.shape}")
             # Classify the data
             movement, confidence, intensity = self.classifier.process_new_data(data_chunk, metadata)
             

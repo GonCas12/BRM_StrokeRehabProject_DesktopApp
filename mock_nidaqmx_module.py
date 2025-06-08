@@ -29,28 +29,31 @@ def reload_data_file():
     """Force reload of the pre-recorded data file"""
     global _LAST_LOADED_FILE, _PRE_RECORDED_DATA_CACHE
     
+    print(f"Mock DAQ: Attempting to reload data file: '{PRE_RECORDED_DATA_FILE}'")
+    print(f"Mock DAQ: File exists: {os.path.exists(PRE_RECORDED_DATA_FILE) if PRE_RECORDED_DATA_FILE else False}")
+    
     if PRE_RECORDED_DATA_FILE and os.path.exists(PRE_RECORDED_DATA_FILE):
         try:
-            # Only reload if file has changed or not loaded yet
-            if _LAST_LOADED_FILE != PRE_RECORDED_DATA_FILE or _PRE_RECORDED_DATA_CACHE is None:
-                print(f"Mock DAQ: Loading pre-recorded data from '{PRE_RECORDED_DATA_FILE}'")
-                _PRE_RECORDED_DATA_CACHE = np.load(PRE_RECORDED_DATA_FILE)
-                _LAST_LOADED_FILE = PRE_RECORDED_DATA_FILE
-                print(f"Mock DAQ: Loaded data with shape {_PRE_RECORDED_DATA_CACHE.shape}")
-                
-                # Reset all readers that might be using this data
-                for name, obj in list(globals().items()):
-                    if isinstance(obj, MockAnalogMultiChannelReader_Internal):
-                        obj.pre_recorded_data = _PRE_RECORDED_DATA_CACHE
-                        obj.current_sample_index = 0
-                        print(f"Mock DAQ: Reset reader {name}")
-                
-                return True
+            print(f"Mock DAQ: Loading pre-recorded data from '{PRE_RECORDED_DATA_FILE}'")
+            new_data = np.load(PRE_RECORDED_DATA_FILE)
+            print(f"Mock DAQ: Successfully loaded data with shape {new_data.shape}")
+            
+            _PRE_RECORDED_DATA_CACHE = new_data
+            _LAST_LOADED_FILE = PRE_RECORDED_DATA_FILE
+            
+            print(f"Mock DAQ: Data cached successfully")
+            return True
+            
         except Exception as e:
-            print(f"Mock DAQ ERROR: Could not load pre-recorded data '{PRE_RECORDED_DATA_FILE}': {e}.")
+            print(f"Mock DAQ ERROR: Could not load pre-recorded data '{PRE_RECORDED_DATA_FILE}': {e}")
+            import traceback
+            traceback.print_exc()
             _PRE_RECORDED_DATA_CACHE = None
             _LAST_LOADED_FILE = None
-    return False
+            return False
+    else:
+        print(f"Mock DAQ: No valid pre-recorded data file specified or file doesn't exist")
+        return False
 
 
 class MockAnalogMultiChannelReader_Internal:
@@ -194,30 +197,20 @@ class MockAnalogMultiChannelReader_Internal:
 
 class stream_readers:
     @staticmethod
-    def AnalogMultiChannelReader(task_in_stream): # task_in_stream is actually task.in_stream object
-        # The task_in_stream passed from the main script is actually the
-        # task.in_stream object, which is an instance of MockAnalogMultiChannelReader_Internal
-        # if task.in_stream was set up correctly.
-        # However, the main script calls nidaqmx.stream_readers.AnalogMultiChannelReader(task.in_stream)
-        # So this function should return an instance of our internal reader.
-        # The task_in_stream argument here is actually the `task.in_stream` object,
-        # which is already an instance of MockAnalogMultiChannelReader_Internal.
-        # This is a bit circular but makes the external call work.
-        # A cleaner way might be to have task.in_stream be a simple placeholder,
-        # and this factory method creates the actual reader.
-
-        # Let's assume task_in_stream is the task._in_stream_proxy attribute
-        # which holds the task instance itself.
-        if isinstance(task_in_stream, Task._InStreamProxy):
-            return MockAnalogMultiChannelReader_Internal(task_in_stream.task)
+    def AnalogMultiChannelReader(task_in_stream):
+        # The task_in_stream is actually the task.in_stream object
+        # which should be the MockAnalogMultiChannelReader_Internal instance
+        if hasattr(task_in_stream, 'task'):
+            # It's already a reader instance, return it
+            return task_in_stream
         else:
-            # Fallback or error if the structure isn't as expected
-            # This path shouldn't usually be taken if MockTask is set up correctly
-            print("Mock DAQ WARNING: AnalogMultiChannelReader received unexpected task_in_stream type.")
-            # Attempt to find the task instance if task_in_stream is the reader itself
-            if hasattr(task_in_stream, 'task') and isinstance(task_in_stream.task, Task):
-                 return task_in_stream # It's already a reader instance
-            raise MockNIDAQmxError("Cannot correctly initialize MockAnalogMultiChannelReader.")
+            # This shouldn't happen, but let's handle it
+            print("Mock DAQ ERROR: Unexpected task_in_stream type in AnalogMultiChannelReader")
+            # Try to find the task from the reader
+            if hasattr(task_in_stream, '_task'):
+                return MockAnalogMultiChannelReader_Internal(task_in_stream._task)
+            else:
+                raise MockNIDAQmxError("Cannot create AnalogMultiChannelReader - invalid task_in_stream")
 # **** END MOCK stream_readers module ****
 
 class MockAIChannels:
