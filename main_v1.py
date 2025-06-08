@@ -728,7 +728,7 @@ class MainWindow(QMainWindow):
         self.last_successful_status_time = 0
         self.advance_on_success = True
         self.close_for_restart_flag = False
-        
+        self.plot_data = []
         self.patient_name = patient_name
         self.session_start_time = None
         self.current_sequence_name = selected_sequence_name
@@ -852,7 +852,7 @@ class MainWindow(QMainWindow):
         ex_top_layout.addWidget(self.video_widget, stretch=3) # Video takes more horizontal space
 
         # EMG Plot
-        self.plot_widget = pg.PlotWidget(title="EMG Signal (Simulated)")
+        self.plot_widget = pg.PlotWidget(title="EMG Signal")
         self.plot_widget.setYRange(-500, 500)
         self.plot_widget.showGrid(x=False, y=True)
         self.emg_curve = self.plot_widget.plot(pen='b') # EMG plot line
@@ -1365,7 +1365,6 @@ class MainWindow(QMainWindow):
             # Check if plot_data is 2D (multiple channels)
             if isinstance(plot_data, list) and isinstance(plot_data[0], list):
                 # It's a 2D array - take channel 0 or average the channels
-                import numpy as np
                 
                 # Option 1: Just use channel 0 (biceps)
                 plot_data_1d = np.array(plot_data[0])
@@ -1377,9 +1376,13 @@ class MainWindow(QMainWindow):
                 # It's already 1D, just convert to numpy array
                 import numpy as np
                 plot_data_1d = np.array(plot_data)
+
+            np.append(self.plot_data, plot_data_1d)
                 
             # Now set the 1D data to the plot
-            self.emg_curve.setData(plot_data_1d)
+            if len(self.plot_data) > 1000:
+                self.emg_curve.setData(self.plot_data)
+                self.plot_data = np.array([])  # Reset after plotting
             
         # Skip if not in an exercise step
         if not (0 <= self.current_step_index < len(self.current_exercise_steps_definition)):

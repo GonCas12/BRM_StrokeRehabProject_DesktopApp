@@ -1,6 +1,4 @@
 === EMG Classifier Debug Log ===
-Started: 2025-06-08 12:41:27
+Started: 2025-06-08 15:42:48
 
-[12:41:36.110] INFO: Mock DAQ: Using pre-recorded data from file 'emg_sequence_test.npy'
-[12:42:22.026] INFO: Mock DAQ: Loaded pre-recorded data from 'C:/Users/berna/OneDrive/Documentos/GitHub/MyoBuddy/user_defined_emg_data_4ch/SS01_T1_emgData_Extension_Biceps_Triceps_FDS_EDS_20250603_113205.npy'
-[12:42:22.027] INFO: Mock DAQ: Using cached pre-recorded data ((4, 8100))
+[15:43:03.741] INFO: Mock DAQ: Using pre-recorded data from file 'emg_sequence_test.npy'
