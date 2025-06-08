@@ -258,6 +258,10 @@ STRINGS = {
         'feedback_strong': "Correct Movement + Sufficient Force! Well done!",
         'feedback_correct_in_progress': "Correct Movement - Keep going!",
         'feedback_movement_completed': "Movement Completed! Moving to next step...",
+        'feedback_next_step_3': "Moving to next step in 3...",
+        'feedback_next_step_2': "Moving to next step in 2...",
+        'feedback_next_step_1': "Moving to next step in 1...",
+        'feedback_next_step_go': "Moving to next step now!",
         'feedback_next_step': "Moving to the next step...",
         'feedback_finished': "Exercise sequence complete! Well Done!",
         'button_next_manual': "Next Step (Manual)",
@@ -345,6 +349,10 @@ STRINGS = {
         'feedback_strong': "Movimento Correto + Força Suficiente! Bom trabalho!",
         'feedback_correct_in_progress': "Movimento Correto - Continue!",
         'feedback_movement_completed': "Movimento Completo! Avançando para o próximo passo...",
+        'feedback_next_step_3': "Avançando para o próximo passo em 3...",
+        'feedback_next_step_2': "Avançando para o próximo passo em 2...",
+        'feedback_next_step_1': "Avançando para o próximo passo em 1...",
+        'feedback_next_step_go': "Avançando para o próximo passo agora!",
         'feedback_next_step': "A avançar para o próximo passo...",
         'feedback_finished': "Sequência de exercícios completa! Parabéns!",
         'button_next_manual': "Próximo Passo (Manual)",
@@ -783,6 +791,9 @@ class MainWindow(QMainWindow):
         
         # Start the first step
         self.advance_step()
+
+        self.countdown_step = 0
+        self.countdown_intensity = 0.0
         
         # IMPORTANT: Set up EMG threading AFTER everything else is initialized
         # And do it with a slight delay to ensure UI is fully ready
@@ -1527,18 +1538,8 @@ class MainWindow(QMainWindow):
                 self.last_successful_status_time = timestamp
                 print(f"Movement completed: {completed_movement['type']} ({completed_movement['duration']:.2f}s)")
                 
-                # Show completion feedback
-                self.feedback_label.setText(self.tr('feedback_movement_completed'))
-                self.set_feedback_style('CORRECT_STRONG')
-                self.play_sound('CORRECT_STRONG')
-                
-                # Schedule the "next step" feedback and advancement
-                def show_next_step_feedback_and_advance():
-                    self.feedback_label.setText(self.tr('feedback_next_step'))
-                    self.play_sound('NEXT_STEP')
-                    QTimer.singleShot(ADVANCE_DELAY_MS, lambda: self.advance_step(intensity=intensity))
-
-                QTimer.singleShot(SHORT_DELAY_FOR_STRONG_FEEDBACK_MS, show_next_step_feedback_and_advance)
+                # Start countdown sequence
+                self.start_movement_completion_countdown(intensity=intensity)
         
         else:
             # No completed movement yet - provide ongoing feedback
@@ -1632,6 +1633,48 @@ class MainWindow(QMainWindow):
         # Advance to next step
         self.current_step_index += 1
         self.load_step()
+
+
+    def start_movement_completion_countdown(self, intensity=0.0):
+        """Start countdown sequence after movement completion"""
+        self.countdown_intensity = intensity  # Store for final advancement
+        self.countdown_step = 3
+        
+        # Show initial success feedback for 1 second
+        self.feedback_label.setText(self.tr('feedback_movement_completed'))
+        self.set_feedback_style('CORRECT_STRONG')
+        self.play_sound('CORRECT_STRONG')
+        
+        # Start countdown after success feedback
+        QTimer.singleShot(1000, self.show_countdown_step)
+
+    def show_countdown_step(self):
+        """Show current countdown step"""
+        if self.countdown_step > 0:
+            # Show countdown number
+            if self.countdown_step == 3:
+                self.feedback_label.setText(self.tr('feedback_next_step_3'))
+            elif self.countdown_step == 2:
+                self.feedback_label.setText(self.tr('feedback_next_step_2'))
+            elif self.countdown_step == 1:
+                self.feedback_label.setText(self.tr('feedback_next_step_1'))
+            
+            self.set_feedback_style('CORRECT_STRONG')  # Keep green during countdown
+            
+            # Play countdown sound (softer than success sound)
+            self.play_sound('NEXT_STEP')
+            
+            self.countdown_step -= 1
+            
+            # Schedule next countdown step
+            QTimer.singleShot(1000, self.show_countdown_step)
+        else:
+            # Countdown finished - advance to next step
+            self.feedback_label.setText(self.tr('feedback_next_step_go'))
+            self.play_sound('NEXT_STEP')
+            
+            # Advance after brief "GO" message
+            QTimer.singleShot(500, lambda: self.advance_step(intensity=self.countdown_intensity))
 
     @Slot()
     def manual_advance_step(self): # Keep as is
