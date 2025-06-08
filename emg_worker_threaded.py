@@ -609,6 +609,7 @@ class EMGDataAcquisitionWorker(QObject):
         self.task = None
         self.reader = None
         self.metadata = None
+        self.num_channels = 4
         
     @Slot()
     def start_acquisition(self):
@@ -627,19 +628,34 @@ class EMGDataAcquisitionWorker(QObject):
                     print("Using mock DAQ with simulated data")
             
             self.task = nidaqmx.Task()
-            self.task.ai_channels.add_ai_voltage_chan("Dev1/ai0:1", min_val=-5.0, max_val=5.0)
+            
+            # Configure for the correct number of channels
+            if self.num_channels == 4:
+                channel_string = "Dev1/ai0:3"  # 4 channels (ai0, ai1, ai2, ai3)
+            elif self.num_channels == 2:
+                channel_string = "Dev1/ai0:1"  # 2 channels (ai0, ai1)
+            else:
+                channel_string = f"Dev1/ai0:{self.num_channels-1}"
+            
+            print(f"DAQ Worker: Configuring {self.num_channels} channels with string: {channel_string}")
+            
+            self.task.ai_channels.add_ai_voltage_chan(channel_string, min_val=-5.0, max_val=5.0)
             self.task.timing.cfg_samp_clk_timing(rate=2000, sample_mode=nidaqmx.AcquisitionType.CONTINUOUS)
             self.reader = nidaqmx.stream_readers.AnalogMultiChannelReader(self.task.in_stream)
             
-            # Calibration
+            # Calibration - use correct number of channels
             self.status_changed.emit("Calibrating...")
-            calibration_buffer = np.zeros((2, 2 * 2000))
+            calibration_duration_s = 2
+            calibration_samples = calibration_duration_s * 2000
+            calibration_buffer = np.zeros((self.num_channels, calibration_samples))  # Use self.num_channels
+            
+            print(f"DAQ Worker: Starting calibration with {self.num_channels} channels, buffer shape: {calibration_buffer.shape}")
             self.task.start()
             
             samples_collected = 0
-            while samples_collected < calibration_buffer.shape[1] and self.running:
-                samples_to_read = min(200, calibration_buffer.shape[1] - samples_collected)
-                temp_buffer = np.zeros((2, samples_to_read))
+            while samples_collected < calibration_samples and self.running:
+                samples_to_read = min(200, calibration_samples - samples_collected)
+                temp_buffer = np.zeros((self.num_channels, samples_to_read))  # Use self.num_channels
                 self.reader.read_many_sample(temp_buffer, samples_to_read)
                 calibration_buffer[:, samples_collected:samples_collected+samples_to_read] = temp_buffer
                 samples_collected += samples_to_read
@@ -647,17 +663,21 @@ class EMGDataAcquisitionWorker(QObject):
             dc_offsets = np.mean(calibration_buffer, axis=1)
             self.metadata = {
                 'dc_offsets': dc_offsets,
-                'sampling_rate': 2000
+                'sampling_rate': 2000,
+                'num_channels': self.num_channels  # Add this to metadata
             }
             
             self.status_changed.emit("Running")
-            print(f"DAQ calibration complete. DC offsets: {dc_offsets}")
+            print(f"DAQ calibration complete. {self.num_channels} channels, DC offsets: {dc_offsets}")
             
-            # Main acquisition loop
+            # Main acquisition loop - use correct number of channels
             while self.running:
                 chunk_size = 200
-                temp_buffer = np.zeros((2, chunk_size))
+                temp_buffer = np.zeros((self.num_channels, chunk_size))  # Use self.num_channels
                 self.reader.read_many_sample(temp_buffer, chunk_size)
+                
+                # Debug: Print actual data shape
+                print(f"DAQ Worker: Read data chunk shape: {temp_buffer.shape}")
                 
                 # Emit data to processing thread
                 self.data_ready.emit(temp_buffer, self.metadata)
@@ -668,6 +688,8 @@ class EMGDataAcquisitionWorker(QObject):
         except Exception as e:
             error_msg = f"DAQ error: {e}"
             print(error_msg)
+            import traceback
+            traceback.print_exc()
             self.error_occurred.emit(error_msg)
         finally:
             self.cleanup()

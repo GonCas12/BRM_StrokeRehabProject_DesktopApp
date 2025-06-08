@@ -7,7 +7,7 @@ from emg_debug_logger import logger
 
 # --- Configuration for Mock DAQ ---
 MOCK_SAMPLING_RATE = 2000
-MOCK_NUM_CHANNELS_TO_SIMULATE_DEFAULT = 2
+MOCK_NUM_CHANNELS_TO_SIMULATE_DEFAULT = 4
 MOCK_VOLTAGE_MIN = -5.0
 MOCK_VOLTAGE_MAX = 5.0
 PRE_RECORDED_DATA_FILE = "emg_sequence_test.npy" # e.g., shape (num_channels, total_samples)

@@ -728,7 +728,11 @@ class MainWindow(QMainWindow):
         self.last_successful_status_time = 0
         self.advance_on_success = True
         self.close_for_restart_flag = False
-        self.plot_data = []
+        self.plot_data = np.array([])
+        self.plot_time = np.array([])  # Time axis
+        self.max_plot_samples = 8000  # 4 seconds at 2000 Hz
+        self.sampling_rate = 2000  # Hz
+        self.plot_start_time = None
         self.patient_name = patient_name
         self.session_start_time = None
         self.current_sequence_name = selected_sequence_name
@@ -853,9 +857,11 @@ class MainWindow(QMainWindow):
 
         # EMG Plot
         self.plot_widget = pg.PlotWidget(title="EMG Signal")
-        self.plot_widget.setYRange(-500, 500)
-        self.plot_widget.showGrid(x=False, y=True)
-        self.emg_curve = self.plot_widget.plot(pen='b') # EMG plot line
+        self.plot_widget.setYRange(-1500, 1500)
+        self.plot_widget.showGrid(x=True, y=True)
+        self.plot_widget.setLabel('bottom', 'Time', units='s')
+        self.plot_widget.setLabel('left', 'Amplitude', units='μV')
+        self.emg_curve = self.plot_widget.plot(pen='b', width=2)
         ex_top_layout.addWidget(self.plot_widget, stretch=2)
 
         # Info part: Step Label + Instructions
@@ -1357,32 +1363,73 @@ class MainWindow(QMainWindow):
                 print("Video ended, looping..."); self.media_player.setPosition(0); self.media_player.play()
 
     @Slot(dict)
+    @Slot(dict)
     def handle_emg_result(self, result):
         # Update plot data
         if 'plot_data' in result:
             plot_data = result['plot_data']
+            current_time = result.get('timestamp', time.time())
             
-            # Check if plot_data is 2D (multiple channels)
-            if isinstance(plot_data, list) and isinstance(plot_data[0], list):
-                # It's a 2D array - take channel 0 or average the channels
-                
-                # Option 1: Just use channel 0 (biceps)
-                plot_data_1d = np.array(plot_data[0])
-                
-                # Option 2: Or average both channels
-                # plot_data_1d = np.mean(np.array(plot_data), axis=0)
-                
+            # Initialize start time if this is the first data
+            if self.plot_start_time is None:
+                self.plot_start_time = current_time
+            
+            # Convert to numpy array and handle different data structures
+            if isinstance(plot_data, list):
+                plot_data = np.array(plot_data)
+            
+            # Handle 2D data (multiple channels)
+            if plot_data.ndim == 2:
+                if plot_data.shape[0] == 4:  # 2 channels, samples in columns
+                    plot_data_1d = plot_data[0, :]  # Use first channel
+                elif plot_data.shape[1] == 4:  # samples in rows, 2 channels in columns
+                    plot_data_1d = plot_data[:, 0]  # Use first channel
+                else:
+                    plot_data_1d = plot_data.flatten()
             else:
-                # It's already 1D, just convert to numpy array
-                import numpy as np
-                plot_data_1d = np.array(plot_data)
-
-            np.append(self.plot_data, plot_data_1d)
-                
-            # Now set the 1D data to the plot
-            if len(self.plot_data) > 1000:
-                self.emg_curve.setData(self.plot_data)
-                self.plot_data = np.array([])  # Reset after plotting
+                plot_data_1d = plot_data
+            
+            # Ensure it's a 1D numpy array
+            plot_data_1d = np.asarray(plot_data_1d).flatten()
+            
+            # Create time array for this chunk
+            chunk_size = len(plot_data_1d)
+            relative_time = current_time - self.plot_start_time
+            
+            # Generate time points for this chunk
+            if len(self.plot_time) == 0:
+                time_start = 0
+            else:
+                time_start = self.plot_time[-1] + (1.0 / self.sampling_rate)
+            
+            chunk_time = np.linspace(
+                time_start,
+                time_start + (chunk_size - 1) / self.sampling_rate,
+                chunk_size
+            )
+            
+            # Append new data to existing buffers
+            if len(self.plot_data) == 0:
+                self.plot_data = plot_data_1d
+                self.plot_time = chunk_time
+            else:
+                self.plot_data = np.concatenate([self.plot_data, plot_data_1d])
+                self.plot_time = np.concatenate([self.plot_time, chunk_time])
+            
+            # Keep only the last max_plot_samples points (rolling window)
+            if len(self.plot_data) > self.max_plot_samples:
+                self.plot_data = self.plot_data[-self.max_plot_samples:]
+                self.plot_time = self.plot_time[-self.max_plot_samples:]
+            
+            # Update the plot with time axis
+            self.emg_curve.setData(self.plot_time, self.plot_data)
+            
+            # Set X-axis to show last 4 seconds
+            if len(self.plot_time) > 0:
+                self.plot_widget.setXRange(
+                    max(0, self.plot_time[-1] - 4.0),  # Show last 4 seconds
+                    self.plot_time[-1] + 0.1  # Small margin
+                )
             
         # Skip if not in an exercise step
         if not (0 <= self.current_step_index < len(self.current_exercise_steps_definition)):
