@@ -33,7 +33,7 @@ import datetime
 import os
 from platformdirs import user_data_dir
 import shutil  # For copying files
-import neurokit2 as nk
+from emg_worker_threaded import EMGProcessingWorker, EMGDataAcquisitionWorker
 
 from report_generator import generate_summary_report_for_patient
 
@@ -47,14 +47,12 @@ from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtCore import QTimer, QUrl, Qt, Slot, Signal, QObject, QThread
 from PySide6.QtGui import QColor, QPalette, QPixmap, QIcon, QDesktopServices
 
-from emg_bridge_manager import EMGBridgeManager
 from PySide6.QtCore import QObject, Signal, Slot
 from PySide6.QtWidgets import QPushButton, QLabel, QComboBox, QCheckBox, QHBoxLayout, QFrame, QFileDialog
 
 import pyqtgraph as pg
 import serial
 
-import zmq
 import json
 import threading
 
@@ -509,249 +507,6 @@ class MovementTracker:
         
         return completed_movement
 
-# --- Worker Thread ---
-class EMGZmqReceiver:
-    def __init__(self, port=5555):
-        """Initialize a ZMQ client to receive EMG data"""
-        self.port = port
-        self.context = zmq.Context()
-        self.socket = self.context.socket(zmq.SUB)
-        self.socket.setsockopt_string(zmq.SUBSCRIBE, "")
-        self.socket.connect(f"tcp://localhost:{self.port}")
-        self.socket.RCVTIMEO = 100  # Set timeout to 100ms
-        self.running = False
-        self.latest_data = None
-        self.receive_thread = None
-    
-    def start(self):
-        """Start receiving data from the ZMQ socket"""
-        self.running = True
-        self.receive_thread = threading.Thread(target=self._receive_data)
-        self.receive_thread.daemon = True
-        self.receive_thread.start()
-        print(f"EMG ZMQ receiver started on port {self.port}")
-    
-    def stop(self):
-        """Stop receiving data"""
-        self.running = False
-        if self.receive_thread:
-            self.receive_thread.join(timeout=1.0)
-        self.socket.close()
-        self.context.term()
-        print("EMG ZMQ receiver stopped")
-    
-    def _receive_data(self):
-        """Receive data from the ZMQ socket in a loop"""
-        while self.running:
-            try:
-                message = self.socket.recv_string()
-                # DEBUG: Print received messages for debugging
-                #print(f"ZMQ RECEIVED: {message[:100]}...")  # Print first 100 chars
-                
-                data = json.loads(message)
-                self.latest_data = data
-            except zmq.error.Again:
-                # Timeout occurred, just continue the loop
-                pass
-            except Exception as e:
-                print(f"Error receiving EMG data: {e}")
-    
-    def get_latest_data(self):
-        """Get the latest received EMG data"""
-        return self.latest_data
-
-class EMGProcessingWorker(QObject):
-    new_result = Signal(dict)
-    movement_detected = Signal(str, float)  # Movement type, confidence
-    stopped = Signal()
-    
-    def __init__(self, zmq_port=5555):
-        super().__init__()
-        self.running = False
-        self.zmq_port = zmq_port
-        self.zmq_context = None
-        self.zmq_socket = None
-        
-        # Movement tracking
-        self.current_movement = "Rest"
-        self.movement_start_time = None
-        self.movement_threshold = 0.65  # Confidence threshold
-        self.min_duration_s = 0.3  # Minimum duration for a valid movement
-        
-    def _setup_zmq(self):
-        """Setup ZMQ connection to receive EMG data with retry mechanism"""
-        
-        # Track retry attempts
-        for attempt in range(3):
-            try:
-                # Clean up any existing connection
-                if hasattr(self, 'zmq_socket') and self.zmq_socket:
-                    try:
-                        self.zmq_socket.close()
-                    except:
-                        pass
-                if hasattr(self, 'zmq_context') and self.zmq_context:
-                    try:
-                        self.zmq_context.term()
-                    except:
-                        pass
-                
-                # Create new connection
-                self.zmq_context = zmq.Context()
-                self.zmq_socket = self.zmq_context.socket(zmq.SUB)
-                self.zmq_socket.setsockopt_string(zmq.SUBSCRIBE, "")
-                self.zmq_socket.connect(f"tcp://localhost:{self.zmq_port}")
-                self.zmq_socket.RCVTIMEO = 100  # Set timeout to 100ms
-                print(f"ZMQ subscriber connected to port {self.zmq_port}")
-                
-                # Give the connection a moment to establish
-                time.sleep(0.5)
-                print("ZMQ connection established successfully")
-                return True
-                
-            except Exception as e:
-                print(f"ZMQ setup attempt {attempt+1} failed: {e}")
-                time.sleep(1)  # Wait before retrying
-        
-        print("Failed to set up ZMQ connection after multiple attempts")
-        return False
-    
-    def _cleanup_zmq(self):
-        """Clean up ZMQ resources"""
-        if self.zmq_socket:
-            self.zmq_socket.close()
-        if self.zmq_context:
-            self.zmq_context.term()
-        self.zmq_socket = None
-        self.zmq_context = None
-    
-    @Slot()
-    def run(self):
-        self.running = True
-        print("Worker thread started.")
-        
-        # Setup ZMQ connection
-        zmq_connected = self._setup_zmq()
-        if zmq_connected:
-            print("ZMQ connection established successfully")
-        else:
-            print("WARNING: ZMQ connection failed")
-        
-        msg_count = 0
-        last_time = time.time()
-        
-        while self.running:
-            if zmq_connected:
-                # Read data from ZMQ
-                try:
-                    message = self.zmq_socket.recv_string()
-                    data = json.loads(message)
-                    
-                    # Get movement type and confidence
-                    movement_type = data.get('movement', 'Rest')
-                    confidence = float(data.get('confidence', 0.0))
-                    intensity = float(data.get('intensity', 0.0))
-                    
-                    # Track movement state changes
-                    if movement_type != self.current_movement:
-                        # If changing to a non-Rest movement with sufficient confidence
-                        if movement_type != "Rest" and confidence >= self.movement_threshold:
-                            # Starting a new movement
-                            if self.current_movement == "Rest":
-                                self.movement_start_time = time.time()
-                                print(f"Starting movement: {movement_type}")
-                            else:
-                                # Transitioning between movements
-                                print(f"Changing movement: {self.current_movement} -> {movement_type}")
-                                
-                                # Complete the previous movement if it lasted long enough
-                                if self.movement_start_time is not None:
-                                    duration = time.time() - self.movement_start_time
-                                    if duration >= self.min_duration_s:
-                                        print(f"Completed movement: {self.current_movement} ({duration:.2f}s)")
-                                        self.movement_detected.emit(self.current_movement, confidence)
-                                
-                                # Start tracking the new movement
-                                self.movement_start_time = time.time()
-                            
-                        elif movement_type == "Rest" and self.current_movement != "Rest":
-                            # Completing a movement
-                            if self.movement_start_time is not None:
-                                duration = time.time() - self.movement_start_time
-                                if duration >= self.min_duration_s:
-                                    print(f"Completed movement: {self.current_movement} ({duration:.2f}s)")
-                                    self.movement_detected.emit(self.current_movement, confidence)
-                            
-                            self.movement_start_time = None
-                        
-                        # Update current movement
-                        self.current_movement = movement_type
-                    
-                    # Map ZMQ status to app status
-                    if movement_type == 'Rest':
-                        status = 'NO_MOVEMENT'
-                    else:
-                        # Active movement detected
-                        if intensity >= 0.5:
-                            status = 'CORRECT_STRONG'
-                        else:
-                            status = 'CORRECT_WEAK'
-                    
-                    # Create the result dict for the app
-                    result = {
-                        'status': status,
-                        'intensity': intensity,
-                        'plot_data': data.get('plot_data', [0.0] * 100),
-                        'timestamp': data.get('timestamp', time.time()),
-                        'movement': movement_type,
-                        'confidence': confidence
-                    }
-                    
-                    # Emit the result to update the UI
-                    self.new_result.emit(result)
-                    
-                except zmq.error.Again:
-                    # Timeout waiting for message
-                    time.sleep(0.01)
-                    continue
-                except Exception as e:
-                    print(f"Error receiving ZMQ data: {e}")
-                    time.sleep(0.1)
-                    continue
-            else:
-                # No ZMQ connection, generate simulated data
-                time.sleep(SIMULATION_DELAY_S)
-                status = random.choices(POSSIBLE_STATUSES, weights=STATUS_WEIGHTS, k=1)[0]
-                intensity = 0.0
-                if status == POSSIBLE_STATUSES[2]: #CORRECT_WEAK 
-                    intensity = random.uniform(0.2, 0.5)
-                    plot_data = nk.emg_simulate(duration=2, sampling_rate=1000, burst_number=1)/10
-
-                elif status == POSSIBLE_STATUSES[3]: #CORRECT_STRONG
-                    intensity = random.uniform(0.55, 1.0)
-                    plot_data = nk.emg_simulate(duration=2, sampling_rate=1000, burst_number=1)
-
-                elif status == POSSIBLE_STATUSES[1]: # INCORRECT_MOVEMENT
-                    plot_data = [random.gauss(0, 0.1) + (intensity * 0.5) for _ in range(100)]
-                
-                elif status == POSSIBLE_STATUSES[0]: #NO_MOVEMENT
-                    plot_data = []
-                result = {'status': status, 'intensity': intensity, 'plot_data': plot_data, 'timestamp': time.time()}
-                self.new_result.emit(result)
-            
-            # Small delay to prevent CPU hammering
-            time.sleep(0.01)
-            
-        # Clean up
-        if zmq_connected:
-            self._cleanup_zmq()
-            
-        print("Worker thread stopping.")
-        self.stopped.emit()
-    
-    def stop(self):
-        print("Stop requested for worker thread.")
-        self.running = False
 
 CURRENT_EXERCISE_STEPS = []
 
@@ -963,53 +718,80 @@ class PDFGenerationWorker(QObject):
             self.error.emit(error_msg)
 
 # --- Main Application Window ---
-class MainWindow(QMainWindow): # Keep as is
+class MainWindow(QMainWindow):
     def __init__(self, patient_name, selected_sequence_name, selected_steps):
         super().__init__()
-        if hasattr(QApplication.instance(), 'current_app_language'): self.current_language = QApplication.instance().current_app_language
-        else: self.current_language = DEFAULT_LANGUAGE
+        if hasattr(QApplication.instance(), 'current_app_language'): 
+            self.current_language = QApplication.instance().current_app_language
+        else: 
+            self.current_language = DEFAULT_LANGUAGE
+            
         self.current_step_index = -1
-        self.arduino = None; self.arduino_status = "disconnected"
-        self.last_successful_status_time = 0; self.advance_on_success = True
+        self.arduino = None
+        self.arduino_status = "disconnected"
+        self.last_successful_status_time = 0
+        self.advance_on_success = True
         self.close_for_restart_flag = False
-        self.patient_name = patient_name; self.session_start_time = None
-        self.current_sequence_name = selected_sequence_name # This is the internal key from EXERCISE_SEQUENCES
+        
+        self.patient_name = patient_name
+        self.session_start_time = None
+        self.current_sequence_name = selected_sequence_name
         self.current_exercise_steps_definition = selected_steps
-        self.session_report_data = []; self.current_step_start_time = None; self.current_step_attempts = {}
+        self.session_report_data = []
+        self.current_step_start_time = None
+        self.current_step_attempts = {}
+        
+        # Initialize threading references
+        self.daq_thread = None
+        self.processing_thread = None
+        self.daq_worker = None
+        self.processing_worker = None
+        self.emg_running = False
+        
         self._start_new_session_tracking()
-        self.sound_effects = {}; self.preload_sounds()
+        
+        self.sound_effects = {}
+        self.preload_sounds()
+        
+        # Set up UI first
         self.setup_ui()
         self.setWindowIcon(QIcon(IMAGE_PATH + "app_icon.png"))
         self.media_player.mediaStatusChanged.connect(self.handle_media_status_changed)
+        
+        # Set up Arduino
         self.setup_arduino()
-        # Create EMG bridge manager
-        self.emg_bridge = EMGBridgeManager()
-        self.emg_bridge.status_changed.connect(self.on_bridge_status_changed)
         
         # Create movement tracker
         self.movement_tracker = MovementTracker(
-            confidence_threshold=0.6,  # Adjust based on your needs
-            min_duration_s=0.3         # Minimum duration for valid movement
+            confidence_threshold=0.6,
+            min_duration_s=0.3
         )
         
-        # Set up EMG ZMQ receiver
-        self.emg_receiver = EMGZmqReceiver(port=5555)
-        self.emg_receiver.start()
-        
-        # Set up worker thread for processing
-        self.worker_thread = QThread()
-        self.emg_worker = EMGProcessingWorker(zmq_port=5555)
-        self.emg_worker.moveToThread(self.worker_thread)
-        self.worker_thread.started.connect(self.emg_worker.run)
-        self.emg_worker.stopped.connect(self.worker_thread.quit)
-        self.emg_worker.new_result.connect(self.handle_emg_result)
-        
-        # Start the worker thread
-        self.worker_thread.start()
+        # Set up EMG controls (UI components)
         self.setup_emg_controls()
-        self.advance_step()  # Removed reference to non-existent processing_thread
+        
+        # PDF thread references
         self.pdf_thread = None
         self.pdf_worker = None
+        
+        # Start the first step
+        self.advance_step()
+        
+        # IMPORTANT: Set up EMG threading AFTER everything else is initialized
+        # And do it with a slight delay to ensure UI is fully ready
+        QTimer.singleShot(1000, self.initialize_emg_system)
+    
+    def initialize_emg_system(self):
+        """Initialize EMG system after UI is fully ready"""
+        try:
+            print("Initializing EMG system...")
+            self.setup_emg_threading()
+            print("EMG system initialized successfully")
+        except Exception as e:
+            print(f"Error initializing EMG system: {e}")
+            # Don't crash the app if EMG fails to initialize
+            if hasattr(self, 'emg_status_label'):
+                self.emg_status_label.setText(f"EMG Status: Failed to initialize - {e}")
 
     def _start_new_session_tracking(self): # Keep as is
         self.session_start_time = datetime.datetime.now(); self.session_report_data = []
@@ -1241,6 +1023,279 @@ class MainWindow(QMainWindow): # Keep as is
             if sound_to_play.isLoaded(): sound_to_play.play()
             else: print(f" -> Warning: Sound {sound_key} not loaded. Attempting play anyway..."); sound_to_play.play()
 
+    def setup_emg_threading(self):
+        """Set up EMG data acquisition and processing in separate threads"""
+        # Clean up any existing threads first
+        self.cleanup_emg_threads()
+        
+        try:
+            print("Setting up EMG threading...")
+            
+            # Create threads
+            self.daq_thread = QThread()
+            self.processing_thread = QThread()
+            
+            # Create workers - handle missing model gracefully
+            model_path = "best_temporal_emg_model.pkl"
+            if not os.path.exists(model_path):
+                print(f"Model file {model_path} not found.")
+            else:
+                print(f"Loading EMG model from {model_path}")
+                self.processing_worker = EMGProcessingWorker(model_path=model_path)
+            
+            self.daq_worker = EMGDataAcquisitionWorker(use_mock=True)
+            
+            # Move workers to threads
+            self.daq_worker.moveToThread(self.daq_thread)
+            self.processing_worker.moveToThread(self.processing_thread)
+            
+            # Connect signals for DAQ worker
+            self.daq_worker.data_ready.connect(self.processing_worker.process_data_chunk)
+            self.daq_worker.status_changed.connect(self.on_daq_status_changed)
+            self.daq_worker.error_occurred.connect(self.on_daq_error)
+            self.daq_worker.finished.connect(self.on_daq_finished)
+            
+            # Connect signals for processing worker
+            self.processing_worker.new_result.connect(self.handle_emg_result)
+            self.processing_worker.movement_detected.connect(self.on_movement_detected)
+            self.processing_worker.error_occurred.connect(self.on_processing_error)
+            self.processing_worker.finished.connect(self.on_processing_finished)
+            
+            # Connect thread started signals
+            self.daq_thread.started.connect(self.daq_worker.start_acquisition)
+            self.processing_thread.started.connect(self.processing_worker.initialize_classifier)
+            
+            # Connect cleanup signals
+            self.daq_worker.finished.connect(self.daq_thread.quit)
+            self.processing_worker.finished.connect(self.processing_thread.quit)
+            
+            # Connect thread finished to deleteLater
+            self.daq_thread.finished.connect(self.daq_thread.deleteLater)
+            self.processing_thread.finished.connect(self.processing_thread.deleteLater)
+            
+            # Track when threads are deleted
+            self.daq_thread.finished.connect(lambda: setattr(self, 'daq_thread', None))
+            self.processing_thread.finished.connect(lambda: setattr(self, 'processing_thread', None))
+            
+            # Start processing thread first, then DAQ thread after a delay
+            self.processing_thread.start()
+            QTimer.singleShot(500, self.start_daq_thread_safely)
+            
+            self.emg_running = True
+            print("EMG threading setup completed successfully")
+            
+            # Update UI
+            if hasattr(self, 'emg_status_label'):
+                self.emg_status_label.setText("EMG Status: Starting...")
+            if hasattr(self, 'emg_start_button'):
+                self.emg_start_button.setText("Stop EMG Acquisition")
+            
+        except Exception as e:
+            print(f"Error setting up EMG threading: {e}")
+            self.cleanup_emg_threads()
+            if hasattr(self, 'emg_status_label'):
+                self.emg_status_label.setText(f"EMG Status: Setup failed - {e}")
+            raise
+
+    def toggle_emg_acquisition(self):
+        """Start or stop EMG acquisition with better error handling"""
+        try:
+            if self.emg_running and self.daq_thread and self.daq_thread.isRunning():
+                # Stop acquisition
+                print("Stopping EMG acquisition...")
+                self.cleanup_emg_threads()
+                self.emg_start_button.setText("Start EMG Acquisition")
+                if hasattr(self, 'emg_status_label'):
+                    self.emg_status_label.setText("EMG Status: Stopped")
+            else:
+                # Start acquisition
+                print("Starting EMG acquisition...")
+                self.setup_emg_threading()
+        except Exception as e:
+            print(f"Error in toggle_emg_acquisition: {e}")
+            self.cleanup_emg_threads()
+            self.emg_start_button.setText("Start EMG Acquisition")
+            if hasattr(self, 'emg_status_label'):
+                self.emg_status_label.setText(f"EMG Status: Error - {e}")
+    
+    def cleanup_emg_threads(self):
+        """Safely cleanup EMG threads"""
+        print("Cleaning up EMG threads...")
+        
+        # Stop workers first
+        if hasattr(self, 'daq_worker') and self.daq_worker:
+            try:
+                self.daq_worker.stop_acquisition()
+            except Exception as e:
+                print(f"Error stopping DAQ worker: {e}")
+        
+        if hasattr(self, 'processing_worker') and self.processing_worker:
+            try:
+                self.processing_worker.stop_processing()
+            except Exception as e:
+                print(f"Error stopping processing worker: {e}")
+        
+        # Wait for threads to finish and clean up
+        if hasattr(self, 'daq_thread') and self.daq_thread:
+            try:
+                if self.daq_thread.isRunning():
+                    self.daq_thread.quit()
+                    if not self.daq_thread.wait(2000):
+                        print("Warning: DAQ thread did not finish gracefully")
+                        self.daq_thread.terminate()
+                        self.daq_thread.wait(1000)
+            except Exception as e:
+                print(f"Error cleaning up DAQ thread: {e}")
+        
+        if hasattr(self, 'processing_thread') and self.processing_thread:
+            try:
+                if self.processing_thread.isRunning():
+                    self.processing_thread.quit()
+                    if not self.processing_thread.wait(2000):
+                        print("Warning: Processing thread did not finish gracefully")
+                        self.processing_thread.terminate()
+                        self.processing_thread.wait(1000)
+            except Exception as e:
+                print(f"Error cleaning up processing thread: {e}")
+        
+        # Reset references
+        self.daq_thread = None
+        self.processing_thread = None
+        self.daq_worker = None
+        self.processing_worker = None
+        self.emg_running = False
+        
+        print("EMG threads cleanup completed")
+
+    @Slot()
+    def on_daq_finished(self):
+        """Handle DAQ worker finished"""
+        print("DAQ worker finished")
+
+    @Slot()
+    def on_processing_finished(self):
+        """Handle processing worker finished"""
+        print("Processing worker finished")
+
+    @Slot(str)
+    def on_daq_status_changed(self, status):
+        """Handle DAQ status changes"""
+        print(f"DAQ Status: {status}")
+        if hasattr(self, 'emg_status_label'):
+            self.emg_status_label.setText(f"EMG Status: {status}")
+
+    @Slot(str)
+    def on_daq_error(self, error_msg):
+        """Handle DAQ errors"""
+        print(f"DAQ Error: {error_msg}")
+        if hasattr(self, 'emg_status_label'):
+            self.emg_status_label.setText(f"EMG Status: DAQ Error - {error_msg}")
+
+    @Slot(str)
+    def on_processing_error(self, error_msg):
+        """Handle processing errors"""
+        print(f"Processing Error: {error_msg}")
+        if hasattr(self, 'emg_status_label'):
+            self.emg_status_label.setText(f"EMG Status: Processing Error - {error_msg}")
+
+    @Slot(str, float)
+    def on_movement_detected(self, movement_type, confidence):
+        """Handle detected movements"""
+        print(f"Movement detected: {movement_type} (confidence: {confidence:.2f})")
+
+    def start_daq_thread_safely(self):
+        """Safely start the DAQ thread with error handling"""
+        try:
+            if hasattr(self, 'daq_thread') and self.daq_thread and not self.daq_thread.isRunning():
+                self.daq_thread.start()
+                print("DAQ thread started successfully")
+            else:
+                print("DAQ thread already running or not available")
+        except Exception as e:
+            print(f"Error starting DAQ thread: {e}")
+            if hasattr(self, 'emg_status_label'):
+                self.emg_status_label.setText(f"EMG Status: DAQ start failed - {e}")
+
+    def start_emg_with_test_file(self):
+        """Start EMG with a test file"""
+        from PySide6.QtWidgets import QFileDialog
+        
+        options = QFileDialog.Options()
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Select EMG Test File", "", 
+            "NumPy Files (*.npy);;All Files (*)", 
+            options=options
+        )
+        
+        if file_path:
+            print(f"Starting EMG with test file: {file_path}")
+            # Stop current acquisition if running
+            if hasattr(self, 'daq_worker') and self.daq_worker:
+                self.cleanup_emg_threads()
+            
+            # Wait a moment for cleanup
+            QTimer.singleShot(1000, lambda: self.setup_emg_with_file(file_path))
+
+    def setup_emg_with_file(self, file_path):
+        """Set up EMG system with a specific test file"""
+        try:
+            # Clean up any existing threads first
+            self.cleanup_emg_threads()
+            
+            # Create threads
+            self.daq_thread = QThread()
+            self.processing_thread = QThread()
+            
+            # Create workers with test file
+            model_path = "best_temporal_emg_model.pkl"
+            if not os.path.exists(model_path):
+                print(f"Model file {model_path} not found.")
+            else:
+                self.processing_worker = EMGProcessingWorker(model_path=model_path)
+            
+            # Use test file for DAQ
+            self.daq_worker = EMGDataAcquisitionWorker(use_mock=True, mock_file=file_path)
+            
+            # Move workers to threads
+            self.daq_worker.moveToThread(self.daq_thread)
+            self.processing_worker.moveToThread(self.processing_thread)
+            
+            # Connect all the signals (same as in setup_emg_threading)
+            self.daq_worker.data_ready.connect(self.processing_worker.process_data_chunk)
+            self.daq_worker.status_changed.connect(self.on_daq_status_changed)
+            self.daq_worker.error_occurred.connect(self.on_daq_error)
+            self.daq_worker.finished.connect(self.on_daq_finished)
+            
+            self.processing_worker.new_result.connect(self.handle_emg_result)
+            self.processing_worker.movement_detected.connect(self.on_movement_detected)
+            self.processing_worker.error_occurred.connect(self.on_processing_error)
+            self.processing_worker.finished.connect(self.on_processing_finished)
+            
+            self.daq_thread.started.connect(self.daq_worker.start_acquisition)
+            self.processing_thread.started.connect(self.processing_worker.initialize_classifier)
+            
+            self.daq_worker.finished.connect(self.daq_thread.quit)
+            self.processing_worker.finished.connect(self.processing_thread.quit)
+            
+            self.daq_thread.finished.connect(self.daq_thread.deleteLater)
+            self.processing_thread.finished.connect(self.processing_thread.deleteLater)
+            
+            self.daq_thread.finished.connect(lambda: setattr(self, 'daq_thread', None))
+            self.processing_thread.finished.connect(lambda: setattr(self, 'processing_thread', None))
+            
+            # Start threads
+            self.processing_thread.start()
+            QTimer.singleShot(500, self.start_daq_thread_safely)
+            
+            self.emg_running = True
+            self.emg_start_button.setText("Stop EMG Acquisition")
+            self.emg_status_label.setText(f"EMG Status: Using test file - {os.path.basename(file_path)}")
+            
+        except Exception as e:
+            print(f"Error setting up EMG with test file: {e}")
+            if hasattr(self, 'emg_status_label'):
+                self.emg_status_label.setText(f"EMG Status: Test file setup failed - {e}")
+        
     def setup_emg_controls(self):
         """Set up EMG data acquisition controls with test file option"""
         # Create a frame for EMG controls
@@ -1268,83 +1323,36 @@ class MainWindow(QMainWindow): # Keep as is
         emg_layout.addLayout(button_layout)
         
         # Status label
-        self.emg_status_label = QLabel("EMG Status: Not running")
+        self.emg_status_label = QLabel("EMG Status: Initializing...")
         emg_layout.addWidget(self.emg_status_label)
         
         # Add the frame to the main layout at the bottom
         central_widget = self.centralWidget()
         if central_widget and central_widget.layout():
             central_widget.layout().addWidget(emg_frame)
-
-    def start_emg_with_test_file(self):
-        """Open file dialog to select test file and start EMG with it"""
-        options = QFileDialog.Options()
-        file_path, _ = QFileDialog.getOpenFileName(
-            self, "Select EMG Test File", "", 
-            "NumPy Files (*.npy);;All Files (*)", 
-            options=options
-        )
+    
+    
+    def closeEvent(self, event):
+        """Clean shutdown of threads"""
+        print("Shutting down EMG threads...")
         
-        if file_path:
-            # Stop any running bridge
-            if self.emg_bridge.is_running:
-                self.emg_bridge.stop_bridge()
-                time.sleep(1)  # Give it time to stop
-            
-            # Start with test file
-            self.emg_start_button.setEnabled(False)
-            self.emg_test_button.setEnabled(False)
-            self.emg_status_label.setText(f"EMG Status: Starting with test file...")
-            
-            def start_bridge_thread():
-                success = self.emg_bridge.start_bridge(simulate=True, test_file=file_path)
-                # Use QTimer for thread-safe UI updates
-                QTimer.singleShot(0, lambda: self.emg_start_button.setEnabled(True))
-                QTimer.singleShot(0, lambda: self.emg_test_button.setEnabled(True))
-            
-            threading.Thread(target=start_bridge_thread, daemon=True).start()
-
-    def toggle_emg_acquisition(self):
-        """Start or stop EMG data acquisition with PySide6 compatibility"""
-        if self.emg_bridge.is_running:
-            # Stop the bridge
-            self.emg_start_button.setEnabled(False)  # Temporarily disable
-            self.emg_status_label.setText("EMG Status: Stopping...")
-            
-            # Use a thread to stop the bridge without blocking the UI
-            def stop_bridge_thread():
-                self.emg_bridge.stop_bridge()
-                # Use QTimer for thread-safe UI updates
-                from PySide6.QtCore import QTimer
-                QTimer.singleShot(0, lambda: self.emg_start_button.setEnabled(True))
-            
-            threading.Thread(target=stop_bridge_thread, daemon=True).start()
-        else:
-            # Start the bridge
-            self.emg_start_button.setEnabled(False)  # Temporarily disable
-            self.emg_status_label.setText("EMG Status: Starting...")
-            
-            # Use a thread to start the bridge without blocking the UI
-            def start_bridge_thread():
-                success = self.emg_bridge.start_bridge()
-                # Use QTimer for thread-safe UI updates
-                from PySide6.QtCore import QTimer
-                QTimer.singleShot(0, lambda: self.emg_start_button.setEnabled(True))
-            
-            threading.Thread(target=start_bridge_thread, daemon=True).start()
-
-                
-    def on_bridge_status_changed(self, status):
-        """Update UI based on bridge status"""
-        self.emg_status_label.setText(f"EMG Status: {status}")
+        # Use the cleanup method instead of direct calls
+        self.cleanup_emg_threads()
         
-        # Re-enable button if needed
-        if not self.emg_bridge.is_running:
-            self.emg_start_button.setText("Start EMG Acquisition")
-            self.emg_start_button.setEnabled(True)
+        # Close Arduino if connected
+        if hasattr(self, 'arduino') and self.arduino and self.arduino.is_open:
+            print("Closing serial port.")
+            self.arduino.close()
+        
+        # Call parent closeEvent
+        if getattr(self, 'close_for_restart_flag', False):
+            print("Accepting close event for restart.")
+            event.accept()
         else:
-            self.emg_start_button.setText("Stop EMG Acquisition")
-            self.emg_start_button.setEnabled(True)
+            print("Accepting close event and quitting application.")
+            event.accept()
+            QApplication.instance().quit()
+  
 
     @Slot(QMediaPlayer.MediaStatus)
     def handle_media_status_changed(self, status: QMediaPlayer.MediaStatus): # Keep as is
@@ -1575,20 +1583,6 @@ class MainWindow(QMainWindow): # Keep as is
     def show_help(self): QMessageBox.information(self, self.tr('help_message_title'), self.tr('help_message_text'))
     @Slot()
     def on_worker_stopped(self): print("Worker thread has confirmed stopped.")
-
-    def closeEvent(self, event): # Keep as is
-        print("Closing application via closeEvent...")
-        if hasattr(self, 'processing_thread') and self.processing_thread and self.processing_thread.isRunning():
-            print("Signaling worker to stop..."); self.worker.stop()
-            print("Waiting for processing thread to finish...")
-            if not self.processing_thread.wait(1000): print("Warning: Worker thread did not stop gracefully.")
-            else: print("Processing thread finished.")
-        if self.arduino and self.arduino.is_open: print("Closing serial port."); self.arduino.close()
-        if getattr(self, 'close_for_restart_flag', False):
-            print("Accepting close event for restart."); event.accept()
-        else:
-            print("Accepting close event and quitting application."); event.accept()
-            QApplication.instance().quit()
 
     def _generate_and_save_report(self):
         """Generates a Markdown report of the session and saves it to a file."""
