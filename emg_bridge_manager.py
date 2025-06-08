@@ -3,6 +3,7 @@ import os
 import signal
 import time
 import threading
+import sys
 from PyQt5.QtCore import QObject, pyqtSignal
 
 class EMGBridgeManager(QObject):
@@ -28,7 +29,7 @@ class EMGBridgeManager(QObject):
             # First kill any existing processes
             print("Checking for existing bridge processes...")
             try:
-                subprocess.run(['python', 'kill_zmq_bridges.py'], 
+                subprocess.run([sys.executable, 'kill_zmq_bridges.py'], 
                             timeout=5, 
                             check=False,
                             stdout=subprocess.PIPE,
@@ -40,7 +41,7 @@ class EMGBridgeManager(QObject):
             time.sleep(1)
             
             # Now start the bridge
-            cmd = ['python', 'run_mock_daq_test.py']
+            cmd = [sys.executable, 'run_mock_daq_test.py']
             
             # Add mock flag if simulating
             if simulate:

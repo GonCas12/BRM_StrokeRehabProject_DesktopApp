@@ -55,6 +55,7 @@ import serial
 
 import json
 import threading
+import numpy as np
 
 def run_application(existing_app=None):
     """
@@ -66,11 +67,6 @@ def run_application(existing_app=None):
     Returns:
         The exit code from the application
     """
-    import sys
-    from PyQt5.QtWidgets import QApplication
-    import pyqtgraph as pg
-    from PyQt5.QtGui import QIcon
-    import os
     
     # Use existing app or create a new one
     if existing_app:
@@ -1481,6 +1477,8 @@ class MainWindow(QMainWindow):
                 'step_id': completed_step_info['id'],
                 'step_name_en': completed_step_info['name_en'], 
                 'step_name_pt': completed_step_info['name_pt'],
+                'movement_type_en': completed_step_info.get('movement_type_en', 'N/A'),
+                'movement_type_pt': completed_step_info.get('movement_type_pt', 'N/A'),
                 'time_taken_seconds': round(time_taken_for_step, 2),
                 'incorrect_attempts': self.current_step_attempts.get('INCORRECT_MOVEMENT', 0),
                 'weak_attempts': self.current_step_attempts.get('CORRECT_WEAK', 0),
@@ -1565,16 +1563,16 @@ class MainWindow(QMainWindow):
     def restart_exercise(self): # Keep as is
         print("Play Again clicked. Requesting restart.")
         self.close_for_restart_flag = True
-        if self.processing_thread and self.processing_thread.isRunning():
+        if self.worker_thread and self.worker_thread.isRunning():
             print("Signaling worker to stop for restart...")
-            self.worker.stop()
+            self.emg_worker.stop()
             try:
-                self.worker.new_result.disconnect(self.handle_emg_result); self.worker.stopped.disconnect(self.on_worker_stopped)
-                self.processing_thread.started.disconnect(self.worker.run); self.worker.stopped.disconnect(self.processing_thread.quit)
-                self.worker.stopped.disconnect(self.worker.deleteLater); self.processing_thread.finished.disconnect(self.processing_thread.deleteLater)
+                self.emg_worker.new_result.disconnect(self.handle_emg_result); self.emg_worker.stopped.disconnect(self.on_worker_stopped)
+                self.worker_thread.started.disconnect(self.emg_worker.run); self.emg_worker.stopped.disconnect(self.worker_thread.quit)
+                self.emg_worker.stopped.disconnect(self.emg_worker.deleteLater); self.worker_thread.finished.disconnect(self.worker_thread.deleteLater)
             except RuntimeError: pass
-            self.processing_thread.quit()
-            if not self.processing_thread.wait(500): print("Warning: Worker thread did not stop quickly during restart.")
+            self.worker_thread.quit()
+            if not self.worker_thread.wait(500): print("Warning: Worker thread did not stop quickly during restart.")
         self.close()
 
     @Slot()
