@@ -2,22 +2,15 @@
 # -*- coding: utf-8 -*-
 
 """
-Stroke Rehabilitation Assistant Application - Dialog Language & UI Fix v2
+Stroke Rehabilitation Assistant Application
 -----------------------------------------------------------------------
-Changes:
-- Fixed exercise names in SelectionDialog not translating.
-- Ensured language button in SelectionDialog remains consistent after
-  language changes in PatientDialog by refactoring UI updates.
-- Fixed button text superposition in MainWindow after language change.
-- Added language switching capability within PatientDialog and SelectionDialog.
-- Dialogs now reflect and can update a shared application language state.
-- PatientDialog for selecting or creating a patient profile.
-- Session reports are now saved in patient-specific subfolders: output/patient_name/
-- Added a placeholder "Create Summary" button on the finished screen.
-- Implemented language localization for Markdown report headers and content.
+This application provides a user interface for guiding stroke patients through
+rehabilitation exercises using simulated EMG feedback. It displays instructional
+videos, provides visual and auditory feedback based on simulated movement
+classification, and includes placeholders for future integration with real EMG
+hardware, ML models, and robot control via Arduino.
 
 Requirements:
-- PySide6, pyqtgraph, pyserial, matplotlib (to be used for report_generator.py)
 - Sound files (WAV) in 'sounds/' subdirectory.
 - Video files (MP4) in 'videos/' subdirectory.
 - Image files (PNG) in 'images/' subdirectory.
