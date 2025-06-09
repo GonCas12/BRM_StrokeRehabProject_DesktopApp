@@ -447,74 +447,6 @@ EXERCISE_SEQUENCES = {
     'Turn Door Knob Sequence': ('sequence_turn_door_knob_name', DOOR_KNOB_STEPS) 
 }
 
-class MovementTracker:
-    """Tracks completed movements for exercise sequences"""
-    def __init__(self, confidence_threshold=0.6, min_duration_s=0.3):
-        self.confidence_threshold = confidence_threshold
-        self.min_duration_s = min_duration_s
-        
-        self.current_movement = "Rest"
-        self.movement_start_time = None
-        self.completed_movements = []
-        self.movement_in_progress = False
-        
-    def update(self, movement, confidence, timestamp):
-        """Update movement state and detect completed movements"""
-        completed_movement = None
-        #print(f"Tracker update: {movement}, conf={confidence:.2f}")
-        # Check for state changes
-        if movement != self.current_movement:
-            # Transitioning to a new movement
-            if movement != "Rest" and confidence >= self.confidence_threshold:
-                # Starting a movement
-                if not self.movement_in_progress:
-                    print(f"[{timestamp:.2f}] Starting movement: {movement} ({confidence:.2f})")
-                    self.movement_start_time = timestamp
-                    self.movement_in_progress = True
-                else:
-                    # Changing movement type mid-movement
-                    print(f"[{timestamp:.2f}] Movement changed: {self.current_movement} → {movement}")
-                    
-                    # Complete the previous movement if it was long enough
-                    if self.movement_start_time is not None:
-                        duration = timestamp - self.movement_start_time
-                        if duration >= self.min_duration_s:
-                            completed_movement = {
-                                'type': self.current_movement,
-                                'start_time': self.movement_start_time,
-                                'end_time': timestamp,
-                                'duration': duration,
-                                'confidence': confidence
-                            }
-                            self.completed_movements.append(completed_movement)
-                            print(f"[{timestamp:.2f}] Completed {self.current_movement} ({duration:.2f}s)")
-                    
-                    # Start tracking the new movement
-                    self.movement_start_time = timestamp
-            
-            elif movement == "Rest" and self.movement_in_progress:
-                # Completing a movement
-                if self.movement_start_time is not None:
-                    duration = timestamp - self.movement_start_time
-                    if duration >= self.min_duration_s:
-                        completed_movement = {
-                            'type': self.current_movement,
-                            'start_time': self.movement_start_time,
-                            'end_time': timestamp,
-                            'duration': duration,
-                            'confidence': confidence
-                        }
-                        self.completed_movements.append(completed_movement)
-                        print(f"[{timestamp:.2f}] Completed {self.current_movement} ({duration:.2f}s)")
-                
-                self.movement_in_progress = False
-                self.movement_start_time = None
-        
-        # Update current movement
-        self.current_movement = movement
-        
-        return completed_movement
-
 
 CURRENT_EXERCISE_STEPS = []
 
@@ -762,6 +694,8 @@ class MainWindow(QMainWindow):
         self.daq_worker = None
         self.processing_worker = None
         self.emg_running = False
+
+        self.movement_tracking_enabled = False
         
         self._start_new_session_tracking()
         
@@ -776,12 +710,6 @@ class MainWindow(QMainWindow):
         # Set up Arduino
         self.setup_arduino()
         
-        # Create movement tracker
-        self.movement_tracker = MovementTracker(
-            confidence_threshold=0.6,
-            min_duration_s=0.3
-        )
-        
         # Set up EMG controls (UI components)
         self.setup_emg_controls()
         
@@ -794,6 +722,7 @@ class MainWindow(QMainWindow):
 
         self.countdown_step = 0
         self.countdown_intensity = 0.0
+        self.movement_completed = False  # NEW: Block incoming predictions when True
         
         # IMPORTANT: Set up EMG threading AFTER everything else is initialized
         # And do it with a slight delay to ensure UI is fully ready
@@ -1005,8 +934,16 @@ class MainWindow(QMainWindow):
             if video_url.isValid(): self.media_player.setSource(video_url); self.media_player.setPosition(0); self.media_player.play(); print(f"Playing video: {video_file}")
             else: print(f"Error: Video file not found or invalid: {VIDEO_PATH + video_file}"); self.feedback_label.setText(f"Error loading video: {video_file}"); self.set_feedback_style('error')
             self.feedback_label.setText(self.tr('feedback_no_movement')); self.set_feedback_style('no_movement')
+            # NEW: Initialize step movement tracking variables
+            self.current_step_movement_count = 0
+            self.current_step_avg_duration = 0.0
+            self.current_step_avg_confidence = 0.0
+            
             self.last_successful_status_time = 0
+            self.movement_completed = False
             self.current_step_start_time = time.time()
+            self.current_step_start_time = time.time()
+
             self.current_step_attempts = {'INCORRECT_MOVEMENT': 0, 'CORRECT_WEAK': 0, 'NO_MOVEMENT': 0}
             print(f"Starting step {self.current_step_index + 1}: {step_name}")
         else:
@@ -1113,7 +1050,7 @@ class MainWindow(QMainWindow):
             
             # Connect signals for processing worker
             self.processing_worker.new_result.connect(self.handle_emg_result)
-            self.processing_worker.movement_detected.connect(self.on_movement_detected)
+            self.processing_worker.movement_completed.connect(self.on_signal_movement_completed)  # NEW
             self.processing_worker.error_occurred.connect(self.on_processing_error)
             self.processing_worker.finished.connect(self.on_processing_finished)
             
@@ -1239,6 +1176,16 @@ class MainWindow(QMainWindow):
         print(f"DAQ Status: {status}")
         if hasattr(self, 'emg_status_label'):
             self.emg_status_label.setText(f"EMG Status: {status}")
+        
+        # Enable movement tracking when calibration is complete
+        if status == "Running":
+            self.movement_tracking_enabled = True
+            print("DAQ calibration complete - movement tracking enabled")
+            # Note: No need to reset MovementTracker since signal-level tracking 
+            # is now handled in EMGProcessingWorker
+        elif status == "Calibrating":
+            self.movement_tracking_enabled = False
+            print("DAQ is calibrating - movement tracking disabled")
 
     @Slot(str)
     def on_daq_error(self, error_msg):
@@ -1258,6 +1205,47 @@ class MainWindow(QMainWindow):
     def on_movement_detected(self, movement_type, confidence):
         """Handle detected movements"""
         print(f"Movement detected: {movement_type} (confidence: {confidence:.2f})")
+
+    @Slot(str, float, float, float)
+    def on_signal_movement_completed(self, movement_type, confidence, timestamp, duration):
+        """Handle movement completion detected at signal level"""
+        print(f"Signal movement completed: {movement_type} ({duration:.2f}s, conf={confidence:.2f})")
+        
+        # Only process if we're tracking and not already completed THIS STEP
+        if not self.movement_tracking_enabled or self.movement_completed:
+            print("Ignoring signal movement - tracking disabled or step already completed")
+            return
+        
+        # Exercise-level validation
+        if not (0 <= self.current_step_index < len(self.current_exercise_steps_definition)):
+            print("Ignoring signal movement - no active step")
+            return
+            
+        step_info = self.current_exercise_steps_definition[self.current_step_index]
+        expected_movement = step_info.get('expected_movement', None)
+        
+        if movement_type == expected_movement:
+            print(f"Movement {movement_type} matches expected {expected_movement} - advancing step")
+            
+            # Update step movement statistics
+            current_count = getattr(self, 'current_step_movement_count', 0)
+            current_avg_duration = getattr(self, 'current_step_avg_duration', 0.0)
+            current_avg_confidence = getattr(self, 'current_step_avg_confidence', 0.0)
+            
+            new_count = current_count + 1
+            new_avg_duration = ((current_avg_duration * current_count) + duration) / new_count
+            new_avg_confidence = ((current_avg_confidence * current_count) + confidence) / new_count
+            
+            self.current_step_movement_count = new_count
+            self.current_step_avg_duration = new_avg_duration
+            self.current_step_avg_confidence = new_avg_confidence
+            
+            # Complete the step
+            self.movement_completed = True
+            self.start_movement_completion_countdown(intensity=confidence)
+        else:
+            print(f"✗ Movement {movement_type} doesn't match expected {expected_movement} - continuing to wait")
+            # Don't reset anything - just continue waiting for the correct movement
 
     def start_daq_thread_safely(self):
         """Safely start the DAQ thread with error handling"""
@@ -1512,6 +1500,16 @@ class MainWindow(QMainWindow):
         # Skip if not in an exercise step
         if not (0 <= self.current_step_index < len(self.current_exercise_steps_definition)):
             return
+        
+        if self.movement_completed:
+            print("Movement completed - ignoring incoming EMG predictions during countdown")
+            return  # Don't process any more EMG results until next step
+        
+            # Early return if movement tracking not enabled
+        if not self.movement_tracking_enabled:
+            self.feedback_label.setText("Calibrating EMG... Please wait")
+            self.set_feedback_style('initializing')
+            return
             
         # Get data from result
         timestamp = result.get('timestamp', time.time())
@@ -1521,59 +1519,37 @@ class MainWindow(QMainWindow):
 
         print(f"EMG Result: {movement_type} (confidence: {confidence:.2f}, intensity: {intensity:.2f}) at {timestamp}")
 
-        # Update movement tracker
-        completed_movement = self.movement_tracker.update(movement_type, confidence, timestamp)
-        
-        # Get expected movement for this step
+         # Get expected movement for this step
         step_info = self.current_exercise_steps_definition[self.current_step_index]
         expected_movement = step_info.get('expected_movement', None)
-        step_confidence_threshold = step_info.get('feedback_threshold', 0.65)
         
-        # NEW IMPROVED FEEDBACK LOGIC - No more confidence values in UI!
-        
-        # Check if movement was completed by tracker
-        if completed_movement and completed_movement['type'] == expected_movement:
-            # Movement completed! Show green feedback and advance
-            if self.last_successful_status_time == 0:
-                self.last_successful_status_time = timestamp
-                print(f"Movement completed: {completed_movement['type']} ({completed_movement['duration']:.2f}s)")
+        # Provide ongoing feedback (movement completion handled by on_signal_movement_completed)
+        if confidence < 0.4:
+            self.feedback_label.setText(self.tr('feedback_no_movement'))
+            self.set_feedback_style('NO_MOVEMENT')
+            
+        elif expected_movement and movement_type != expected_movement and movement_type != 'Rest':
+            self.feedback_label.setText(self.tr('feedback_incorrect'))
+            self.set_feedback_style('INCORRECT_MOVEMENT')
+            self.play_sound('INCORRECT_MOVEMENT')
+            
+            # Track incorrect attempts
+            if 'INCORRECT_MOVEMENT' in self.current_step_attempts:
+                self.current_step_attempts['INCORRECT_MOVEMENT'] += 1
                 
-                # Start countdown sequence
-                self.start_movement_completion_countdown(intensity=intensity)
-        
-        else:
-            # No completed movement yet - provide ongoing feedback
-            if confidence < 0.4:  # Low confidence movements are treated as rest
-                self.feedback_label.setText(self.tr('feedback_no_movement'))
-                self.set_feedback_style('NO_MOVEMENT')
-                # Don't play sound for no movement to avoid spam
+        elif movement_type == expected_movement:
+            if confidence >= 0.65:
+                self.feedback_label.setText(self.tr('feedback_correct_in_progress'))
+                self.set_feedback_style('CORRECT_IN_PROGRESS')
+            else:
+                self.feedback_label.setText(self.tr('feedback_weak'))
+                self.set_feedback_style('CORRECT_WEAK')
                 
-            elif expected_movement and movement_type != expected_movement and movement_type != 'Rest':
-                # Wrong movement type detected
-                self.feedback_label.setText(self.tr('feedback_incorrect'))
-                self.set_feedback_style('INCORRECT_MOVEMENT')
-                self.play_sound('INCORRECT_MOVEMENT')
-                
-                # Track incorrect attempts
-                if 'INCORRECT_MOVEMENT' in self.current_step_attempts:
-                    self.current_step_attempts['INCORRECT_MOVEMENT'] += 1
-                
-            elif movement_type == expected_movement:
-                # Correct movement type detected, but not completed yet
-                if confidence >= step_confidence_threshold:
-                    # Strong enough signal - encourage to continue
-                    self.feedback_label.setText(self.tr('feedback_correct_in_progress'))
-                    self.set_feedback_style('CORRECT_IN_PROGRESS')  # Yellow
-                    self.play_sound('CORRECT_WEAK')  # Soft encouragement sound
-                else:
-                    # Weak signal - ask for more force
-                    self.feedback_label.setText(self.tr('feedback_weak'))
-                    self.set_feedback_style('CORRECT_WEAK')
-                    self.play_sound('CORRECT_WEAK')
-                    
-                    # Track weak attempts
-                    if 'CORRECT_WEAK' in self.current_step_attempts:
-                        self.current_step_attempts['CORRECT_WEAK'] += 1
+            self.play_sound('CORRECT_WEAK')
+            
+            # Track weak attempts
+            if 'CORRECT_WEAK' in self.current_step_attempts:
+                self.current_step_attempts['CORRECT_WEAK'] += 1
 
     @Slot()
     def advance_step(self, intensity=0.0):
@@ -1584,19 +1560,15 @@ class MainWindow(QMainWindow):
             time_taken_for_step = time.time() - self.current_step_start_time
             completed_step_info = self.current_exercise_steps_definition[self.current_step_index]
             
-            # Get movement data for this step
+            # NEW: Get movement data from the completed movements we received via signals
+            # Since we now track movements via signals, we need to store them differently
             expected_movement = completed_step_info.get('expected_movement', None)
-            matching_movements = [m for m in self.movement_tracker.completed_movements 
-                                if m['type'] == expected_movement]
             
-            # Calculate movement metrics
-            movement_count = len(matching_movements)
-            avg_duration = 0
-            avg_confidence = 0
-            
-            if matching_movements:
-                avg_duration = sum(m['duration'] for m in matching_movements) / movement_count
-                avg_confidence = sum(m['confidence'] for m in matching_movements) / movement_count
+            # Get movement metrics from the step (since we don't have MovementTracker anymore)
+            # We'll need to track these during the step execution
+            movement_count = getattr(self, 'current_step_movement_count', 0)
+            avg_duration = getattr(self, 'current_step_avg_duration', 0.0)
+            avg_confidence = getattr(self, 'current_step_avg_confidence', 0.0)
             
             # Create step report
             step_data = {
@@ -1620,15 +1592,23 @@ class MainWindow(QMainWindow):
         # Reset for next step
         self.current_step_start_time = None
         self.last_successful_status_time = 0
+        self.movement_completed = False
+        if hasattr(self, 'processing_worker') and self.processing_worker:
+            self.processing_worker.reset_movement_tracking()
+        
+        # NEW: Reset step-level movement tracking variables
+        self.current_step_movement_count = 0
+        self.current_step_avg_duration = 0.0
+        self.current_step_avg_confidence = 0.0
+        print("Step movement tracking variables reset")
+        
+        # Note: No need to reset EMGProcessingWorker state - it continues tracking independently
         
         # Send robot command if needed
         if self.current_step_index >= 0 and intensity > 0:
             if 0 <= self.current_step_index < len(self.current_exercise_steps_definition):
                 step_info = self.current_exercise_steps_definition[self.current_step_index]
                 self.send_robot_command(step_info['id'], intensity)
-        
-        # Clear movement history for the next step
-        self.movement_tracker.completed_movements = []
         
         # Advance to next step
         self.current_step_index += 1
@@ -1677,30 +1657,54 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(500, lambda: self.advance_step(intensity=self.countdown_intensity))
 
     @Slot()
-    def manual_advance_step(self): # Keep as is
+    def manual_advance_step(self):
         print("Manual advance requested.")
         if self.current_step_start_time is not None and \
-           0 <= self.current_step_index < len(self.current_exercise_steps_definition):
+        0 <= self.current_step_index < len(self.current_exercise_steps_definition):
             time_taken_for_step = time.time() - self.current_step_start_time
             current_step_info = self.current_exercise_steps_definition[self.current_step_index]
+            
+            # Get movement data (same as advance_step)
+            movement_count = getattr(self, 'current_step_movement_count', 0)
+            avg_duration = getattr(self, 'current_step_avg_duration', 0.0)
+            avg_confidence = getattr(self, 'current_step_avg_confidence', 0.0)
+            
             step_data = {
                 'step_id': current_step_info['id'],
-                'step_name_en': current_step_info['name_en'], 'step_name_pt': current_step_info['name_pt'],
+                'step_name_en': current_step_info['name_en'], 
+                'step_name_pt': current_step_info['name_pt'],
                 'movement_type_en': current_step_info.get('movement_type_en', 'N/A'),
                 'movement_type_pt': current_step_info.get('movement_type_pt', 'N/A'),
                 'time_taken_seconds': round(time_taken_for_step, 2),
                 'incorrect_attempts': self.current_step_attempts.get('INCORRECT_MOVEMENT', 0),
                 'weak_attempts': self.current_step_attempts.get('CORRECT_WEAK', 0),
                 'no_movement_attempts': self.current_step_attempts.get('NO_MOVEMENT', 0),
+                'movement_count': movement_count,
+                'avg_movement_duration': round(avg_duration, 2),
+                'avg_movement_confidence': round(avg_confidence, 2),
                 'manually_advanced': True
             }
             self.session_report_data.append(step_data)
             print(f"Step {self.current_step_index + 1} manually advanced. Data: {step_data}")
+        
+        # Reset for next step
         self.current_step_start_time = None
+        self.movement_completed = False
+        if hasattr(self, 'processing_worker') and self.processing_worker:
+            self.processing_worker.reset_movement_tracking()
+        
+        # Reset step movement tracking variables
+        self.current_step_movement_count = 0
+        self.current_step_avg_duration = 0.0
+        self.current_step_avg_confidence = 0.0
+        
+        # Send robot command
         if 0 <= self.current_step_index < len(self.current_exercise_steps_definition):
             step_info = self.current_exercise_steps_definition[self.current_step_index]
             self.send_robot_command(step_info['id'], 0.1)
-        else: print("Cannot send command for manual advance, sequence finished or not started.")
+        else: 
+            print("Cannot send command for manual advance, sequence finished or not started.")
+        
         self.current_step_index += 1
         self.load_step()
 

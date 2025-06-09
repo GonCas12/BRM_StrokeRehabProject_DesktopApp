@@ -47,7 +47,7 @@ def preprocess_emg(emg_data, metadata, dc_tracker, apply_filters=True):
         
         processed_data[c, :] = channel_data
     
-    print(f"Adaptive DC offsets: {current_dc_offsets}")
+    #print(f"Adaptive DC offsets: {current_dc_offsets}")
     return processed_data
 
 def apply_bandpass_filter(signal_data, low_freq, high_freq, sampling_rate):
@@ -553,11 +553,6 @@ class EMGClassifier:
             raw_intensity = np.sqrt(np.mean(self.buffer**2))
             signal_intensity = np.sqrt(np.mean(processed_data**2))
             
-            print(f"Intensity calculation:")
-            print(f"  Raw buffer intensity: {raw_intensity:.6f}")
-            print(f"  Processed intensity: {signal_intensity:.6f}")
-            print(f"  Buffer shape: {self.buffer.shape}")
-            print(f"  Processed shape: {processed_data.shape}")
             
             # Extract features using the updated function
             window = np.expand_dims(processed_data, axis=0)
@@ -791,10 +786,11 @@ class EMGDataAcquisitionWorker(QObject):
 
 class EMGProcessingWorker(QObject):
     """Worker that processes EMG data and classifies movements"""
-    new_result = Signal(dict)
-    movement_detected = Signal(str, float)
+    new_result = Signal(dict)  # For ongoing feedback
+    movement_completed = Signal(str, float, float, float)  # movement, confidence, timestamp, duration
     error_occurred = Signal(str)
     finished = Signal()
+    reset_movement_state = Signal()
     
     def __init__(self, model_path="best_temporal_emg_model.pkl"):
         super().__init__()
@@ -821,7 +817,7 @@ class EMGProcessingWorker(QObject):
     
     @Slot(np.ndarray, dict)
     def process_data_chunk(self, data_chunk, metadata):
-        """Process a chunk of EMG data"""
+        """Process a chunk of EMG data - handle all movement transitions"""
         if not self.running:
             return
             
@@ -829,55 +825,61 @@ class EMGProcessingWorker(QObject):
             if not self.classifier:
                 return
             
-            raw_rms = np.sqrt(np.mean(data_chunk**2))
-            raw_max = np.max(np.abs(data_chunk))
-            print(f"Raw data - RMS: {raw_rms:.6f}, Max: {raw_max:.6f}, Shape: {data_chunk.shape}")
             # Classify the data
             movement, confidence, intensity = self.classifier.process_new_data(data_chunk, metadata)
             
             if movement is not None:
-                # Track movement state changes
                 timestamp = time.time()
+                
+                # Handle all types of movement transitions
                 if movement != self.current_movement:
-                    if movement != "Rest" and confidence >= self.movement_threshold:
-                        if self.current_movement == "Rest":
-                            self.movement_start_time = timestamp
-                            print(f"Starting movement: {movement}")
-                        else:
-                            print(f"Changing movement: {self.current_movement} -> {movement}")
-                            if self.movement_start_time is not None:
-                                duration = timestamp - self.movement_start_time
-                                if duration >= self.min_duration_s:
-                                    print(f"Completed movement: {self.current_movement} ({duration:.2f}s)")
-                                    self.movement_detected.emit(self.current_movement, confidence)
-                            self.movement_start_time = timestamp
-                            
-                    elif movement == "Rest" and self.current_movement != "Rest":
+                    
+                    # Case 1: Any movement ending (going to Rest)
+                    if movement == "Rest" and self.current_movement != "Rest":
                         if self.movement_start_time is not None:
                             duration = timestamp - self.movement_start_time
                             if duration >= self.min_duration_s:
-                                print(f"Completed movement: {self.current_movement} ({duration:.2f}s)")
-                                self.movement_detected.emit(self.current_movement, confidence)
+                                print(f"Signal-level movement completed: {self.current_movement} ({duration:.2f}s) -> Rest")
+                                self.movement_completed.emit(self.current_movement, confidence, timestamp, duration)
                         self.movement_start_time = None
                     
-                    self.current_movement = movement
+                    # Case 2: Starting movement from Rest
+                    elif movement != "Rest" and self.current_movement == "Rest" and confidence >= self.movement_threshold:
+                        self.movement_start_time = timestamp
+                        print(f"Signal-level movement started: {movement} (from Rest)")
+                    
+                    # Case 3: Direct movement transition (Flexion -> Extension)
+                    elif movement != "Rest" and self.current_movement != "Rest" and confidence >= self.movement_threshold:
+                        # Complete previous movement
+                        if self.movement_start_time is not None:
+                            duration = timestamp - self.movement_start_time
+                            if duration >= self.min_duration_s:
+                                print(f"Signal-level movement completed: {self.current_movement} ({duration:.2f}s) -> {movement}")
+                                self.movement_completed.emit(self.current_movement, confidence, timestamp, duration)
+                        
+                        # Start new movement immediately
+                        self.movement_start_time = timestamp
+                        print(f"Signal-level movement started: {movement} (from {self.current_movement})")
+                    
+                    # Case 4: Low confidence transition (might be noise)
+                    elif movement != "Rest" and confidence < self.movement_threshold:
+                        print(f"Low confidence movement {movement} (conf={confidence:.2f}) - ignoring transition")
+                        # Don't change current_movement or movement_start_time
+                        movement = self.current_movement  # Keep current state
+                    
+                    # Update current movement (except for low confidence cases)
+                    if confidence >= self.movement_threshold or movement == "Rest":
+                        self.current_movement = movement
                 
-                # Determine status for the app
-                if movement == 'Rest':
-                    status = 'NO_MOVEMENT'
-                else:
-                    if intensity >= 0.5:
-                        status = 'CORRECT_STRONG'
-                    else:
-                        status = 'CORRECT_WEAK'
+                # ALWAYS emit ongoing feedback
+                status = 'NO_MOVEMENT' if movement == 'Rest' else ('CORRECT_STRONG' if intensity >= 0.5 else 'CORRECT_WEAK')
                 
-                # Apply DC offset correction for plot data
+                # Plot data preparation
                 plot_data = data_chunk.copy()
                 for i in range(data_chunk.shape[0]):
                     plot_data[i, :] = data_chunk[i, :] - metadata['dc_offsets'][i]
-                plot_data = plot_data * 1000  # Convert to μV
+                plot_data = plot_data * 1000
                 
-                # Create result
                 result = {
                     'status': status,
                     'intensity': float(intensity),
@@ -888,12 +890,10 @@ class EMGProcessingWorker(QObject):
                 }
                 
                 self.new_result.emit(result)
-                
+                    
         except Exception as e:
             error_msg = f"Error processing EMG data: {e}"
             print(error_msg)
-            import traceback
-            traceback.print_exc()
             self.error_occurred.emit(error_msg)
     
     @Slot()
@@ -902,3 +902,11 @@ class EMGProcessingWorker(QObject):
         print("Stopping EMG processing...")
         self.running = False
         self.finished.emit()
+
+    @Slot()
+    def reset_movement_tracking(self):
+        """Reset movement tracking state (called when step changes)"""
+        print("EMGProcessingWorker: Resetting movement state")
+        self.current_movement = "Rest"
+        self.movement_start_time = None
+        print(f"EMGProcessingWorker: Reset complete - current_movement={self.current_movement}")
