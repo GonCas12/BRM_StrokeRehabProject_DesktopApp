@@ -89,10 +89,8 @@ void processCommand(char* command) {
         Serial.print(", Velocity: "); Serial.println(velocity);
 
         // Define base delay values (milliseconds) for servo movement
-        // These determine the absolute slowest and fastest physical movement
-        // Tune these based on your servo's characteristics
-        int minServoDelay = 15; // Shortest delay (fastest physical movement, e.g., 15ms)
-        int maxServoDelay = 70; // Longest delay (slowest physical movement, e.g., 70ms)
+        int minServoDelay = 15; // Shortest delay
+        int maxServoDelay = 70; // Longest delay
 
         // Control servos based on step_id
         switch (step_id) {
@@ -102,14 +100,14 @@ void processCommand(char* command) {
             moveServoSmooth(&Servo_2, &currentPos_2, 90, velocity, minServoDelay, maxServoDelay);
             moveServoSmooth(&Servo_3, &currentPos_3, 170, velocity, minServoDelay, maxServoDelay); // Open gripper
             break;
+          
+          // CUP SEQUENCE
           case 1: // Reach for Cup
             moveServoSmooth(&Servo_1, &currentPos_1, 120, velocity, minServoDelay, maxServoDelay);
             moveServoSmooth(&Servo_2, &currentPos_2, 110, velocity, minServoDelay, maxServoDelay);
             break;
           case 2: // Grasp Cup
-            // For grasping, you might want a fixed, gentle speed regardless of input velocity
-            // int graspVelocityMapped = map(100, 0, 255, maxServoDelay, minServoDelay); // Example: map a mid-range velocity
-            moveServoSmooth(&Servo_3, &currentPos_3, 90, velocity, minServoDelay, maxServoDelay); // Using input velocity for now
+            moveServoSmooth(&Servo_3, &currentPos_3, 90, velocity, minServoDelay, maxServoDelay);
             break;
           case 3: // Lift Cup
             moveServoSmooth(&Servo_1, &currentPos_1, 70, velocity, minServoDelay, maxServoDelay);
@@ -121,6 +119,75 @@ void processCommand(char* command) {
             moveServoSmooth(&Servo_2, &currentPos_2, 110, velocity, minServoDelay, maxServoDelay);
             moveServoSmooth(&Servo_1, &currentPos_1, 120, velocity, minServoDelay, maxServoDelay);
             break;
+
+          // SOUP STEPS
+          case 6: // Reach for Spoon
+            moveServoSmooth(&Servo_1, &currentPos_1, 120, velocity, minServoDelay, maxServoDelay); 
+            moveServoSmooth(&Servo_2, &currentPos_2, 110, velocity, minServoDelay, maxServoDelay); 
+            break;
+          case 7: // Grasp Spoon
+            moveServoSmooth(&Servo_3, &currentPos_3, 90, velocity, minServoDelay, maxServoDelay); 
+            break;
+          case 8: // Scoop Soup
+            moveServoSmooth(&Servo_0, &currentPos_0, 70, velocity, minServoDelay, maxServoDelay);  
+            moveServoSmooth(&Servo_1, &currentPos_1, 80, velocity, minServoDelay, maxServoDelay);  
+            moveServoSmooth(&Servo_2, &currentPos_2, 100, velocity, minServoDelay, maxServoDelay); 
+            break;
+          case 9: // Bring Spoon to Mouth
+            moveServoSmooth(&Servo_1, &currentPos_1, 70, velocity, minServoDelay, maxServoDelay);  
+            moveServoSmooth(&Servo_2, &currentPos_2, 70, velocity, minServoDelay, maxServoDelay);  
+            break;
+          case 10: // Return Spoon to Bowl
+            moveServoSmooth(&Servo_2, &currentPos_2, 100, velocity, minServoDelay, maxServoDelay); 
+            moveServoSmooth(&Servo_1, &currentPos_1, 80, velocity, minServoDelay, maxServoDelay);  
+            moveServoSmooth(&Servo_0, &currentPos_0, 90, velocity, minServoDelay, maxServoDelay);  
+            break;
+          case 11: // Lower Spoon (and release)
+            moveServoSmooth(&Servo_2, &currentPos_2, 110, velocity, minServoDelay, maxServoDelay); 
+            moveServoSmooth(&Servo_1, &currentPos_1, 120, velocity, minServoDelay, maxServoDelay); 
+            moveServoSmooth(&Servo_3, &currentPos_3, 170, velocity, minServoDelay, maxServoDelay); 
+            break;
+
+          // BOOK GRAB STEPS
+          case 12: // Reach for Book
+            moveServoSmooth(&Servo_1, &currentPos_1, 130, velocity, minServoDelay, maxServoDelay); 
+            moveServoSmooth(&Servo_2, &currentPos_2, 120, velocity, minServoDelay, maxServoDelay); 
+            break;
+          case 13: // Grasp Book
+            moveServoSmooth(&Servo_3, &currentPos_3, 90, velocity, minServoDelay, maxServoDelay);  
+            break;
+          case 14: // Lift Book
+            moveServoSmooth(&Servo_1, &currentPos_1, 60, velocity, minServoDelay, maxServoDelay);  
+            break;
+          case 15: // Turn Book
+            moveServoSmooth(&Servo_2, &currentPos_2, 50, velocity, minServoDelay, maxServoDelay); 
+            break;
+          case 16: // Lower Book (and release)
+            moveServoSmooth(&Servo_2, &currentPos_2, 120, velocity, minServoDelay, maxServoDelay); 
+            moveServoSmooth(&Servo_1, &currentPos_1, 130, velocity, minServoDelay, maxServoDelay); 
+            moveServoSmooth(&Servo_3, &currentPos_3, 170, velocity, minServoDelay, maxServoDelay); 
+            break;
+
+          // DOOR KNOB STEPS
+          case 17: // Reach for Door Knob
+            moveServoSmooth(&Servo_1, &currentPos_1, 110, velocity, minServoDelay, maxServoDelay); 
+            moveServoSmooth(&Servo_2, &currentPos_2, 100, velocity, minServoDelay, maxServoDelay); 
+            break;
+          case 18: // Grasp Door Knob
+            moveServoSmooth(&Servo_3, &currentPos_3, 80, velocity, minServoDelay, maxServoDelay);  
+            break;
+          case 19: // Turn Door Knob 
+            moveServoSmooth(&Servo_0, &currentPos_0, 70, velocity, minServoDelay, maxServoDelay);  
+            break;
+          case 20: // Retract Hand 
+            moveServoSmooth(&Servo_2, &currentPos_2, 90, velocity, minServoDelay, maxServoDelay);  
+            moveServoSmooth(&Servo_1, &currentPos_1, 90, velocity, minServoDelay, maxServoDelay);  
+            moveServoSmooth(&Servo_0, &currentPos_0, 90, velocity, minServoDelay, maxServoDelay);  
+            break;
+          case 21: // Release Door Knob
+            moveServoSmooth(&Servo_3, &currentPos_3, 170, velocity, minServoDelay, maxServoDelay); 
+            break;
+
           default:
             Serial.println("Warning: Unknown step_id received.");
             break;
