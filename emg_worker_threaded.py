@@ -824,7 +824,12 @@ class EMGProcessingWorker(QObject):
         try:
             if not self.classifier:
                 return
+            if not hasattr(self, 'debug_chunk_count'):
+                self.debug_chunk_count = 0
+            self.debug_chunk_count += 1
             
+            if self.debug_chunk_count % 50 == 0:
+                print(f"EMGProcessingWorker: Processing chunk {self.debug_chunk_count}, shape={data_chunk.shape}")
             # Classify the data
             movement, confidence, intensity = self.classifier.process_new_data(data_chunk, metadata)
             
